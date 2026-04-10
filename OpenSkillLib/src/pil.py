@@ -1,17 +1,17 @@
 """
-run_full_pipeline.py — Embed todas as skills + Re-treina + Testa o sistema
+run_full_pipeline.py — Embed all skills + Re-train + Test the system
 ==========================================================================
-Executa as 3 etapas na ordem certa:
-  1. Embed: gera vetores 1536d para TODAS as skills via OpenRouter
-             e verifica que foram persistidos no bundle correto
-  2. Retrain: regenera dataset e treina o scorer com todas as skills
-  3. Test: executa queries reais e verifica se confidence > 0.35
+Executes the 3 stages in the correct order:
+  1. Embed: generates 1536d vectors for ALL skills via OpenRouter
+             and verifies they were persisted in the correct bundle
+  2. Retrain: regenerates dataset and trains the scorer with all skills
+  3. Test: executes real queries and verifies if confidence > 0.35
 
-Uso:
+Usage:
     python run_full_pipeline.py --api-key sk-or-v1-...
     python run_full_pipeline.py --api-key sk-or-v1-... --skill-dir ./skills_output
-    python run_full_pipeline.py --api-key sk-or-v1-... --skip-embed   (pula etapa 1)
-    python run_full_pipeline.py --api-key sk-or-v1-... --skip-train   (pula etapa 2)
+    python run_full_pipeline.py --api-key sk-or-v1-... --skip-embed   (skips stage 1)
+    python run_full_pipeline.py --api-key sk-or-v1-... --skip-train   (skips stage 2)
 """
 
 from __future__ import annotations
@@ -24,12 +24,12 @@ import time
 from pathlib import Path
 
 
-# ─── Verificação de persistência ─────────────────────────────────────────────
+# ─── Persistence Verification ─────────────────────────────────────────────
 
 def verify_embeddings_persisted(skill_dir: str, expected_dim: int = 1536) -> dict:
     """
-    Varre os meta.json dos bundles e conta quantos têm vetor da dimensão esperada.
-    Retorna diagnóstico detalhado para validar antes de treinar.
+    Scans bundle meta.json files and counts how many have a vector of the expected dimension.
+    Returns detailed diagnostic to validate before training.
     """
     skills_path = Path(skill_dir) / "skills"
     result = {"total_bundles": 0, "have_vector": 0, "missing_vector": [], "dims_found": set()}
@@ -51,7 +51,7 @@ def verify_embeddings_persisted(skill_dir: str, expected_dim: int = 1536) -> dic
                     found = True
                     break
 
-            # Fallback: campo embedding raiz
+            # Fallback: root embedding field
             if not found:
                 root_emb = data.get("embedding")
                 if root_emb and len(root_emb) == expected_dim:
@@ -69,10 +69,10 @@ def verify_embeddings_persisted(skill_dir: str, expected_dim: int = 1536) -> dic
     return result
 
 
-# ─── Etapa 1: Embed todas as skills ──────────────────────────────────────────
+# ─── Stage 1: Embed all skills ──────────────────────────────────────────
 
 async def embed_all_skills(skill_dir: str, api_key: str, local: bool = False) -> dict:
-    """Gera embeddings. Se local=True usa 384d, se local=False usa OpenAI 1536d."""
+    """Generates embeddings. If local=True uses 384d, if local=False uses OpenAI 1536d."""
     from openskill.storage.local import LocalDiskStore
     from openskill.core.vector import pack_qvector
     import os
@@ -91,7 +91,7 @@ async def embed_all_skills(skill_dir: str, api_key: str, local: bool = False) ->
         quantizer = TurboQuantizer(dimension=1536)
 
     all_metas = await store.list_skills()
-    print(f"\n  Skills encontradas: {len(all_metas)}")
+    print(f"\n  Skills found: {len(all_metas)}")
 
     results = {"total": len(all_metas), "embedded": 0, "skipped": 0, "failed": []}
 
@@ -99,7 +99,7 @@ async def embed_all_skills(skill_dir: str, api_key: str, local: bool = False) ->
         title = meta.title or meta.id
         print(f"\n  [{i}/{len(all_metas)}] {title[:60]}")
 
-        # Verifica se já tem vetor 1536d no bundle (não GNN)
+        # Check if 1536d vector already exists in bundle (not GNN)
         already_has_1536 = False
         if meta.vectors:
             for profile in meta.vectors.values():
@@ -111,25 +111,25 @@ async def embed_all_skills(skill_dir: str, api_key: str, local: bool = False) ->
                     break
 
         if already_has_1536:
-            print(f"    ✓ Já tem 1536d no bundle — pulando")
+            print(f"    ✓ Already has 1536d in bundle — skipping")
             results["skipped"] += 1
             continue
 
-        # Carrega o markdown da skill
+        # Load skill markdown
         skill_md = await store.get_skill_md(meta.id)
         if not skill_md:
-            print(f"    ✗ Markdown não encontrado — pulando")
+            print(f"    ✗ Markdown not found — skipping")
             results["failed"].append(meta.id)
             continue
 
-        # Gera embedding
+        # Generate embedding
         try:
-            print(f"    → Gerando embedding {target_dim}d...")
+            print(f"    → Generating {target_dim}d embedding...")
             if local:
                 # Local 384d
                 vec_np = embedder.encode(skill_md[:3000], normalize_embeddings=True)
                 embedding_list = vec_np.tolist()
-                qv_pack = {}  # Qvector dummy para local
+                qv_pack = {}  # Dummy qvector for local
                 prov = "LocalMiniLM"
             else:
                 # OpenAI 1536d
@@ -147,7 +147,7 @@ async def embed_all_skills(skill_dir: str, api_key: str, local: bool = False) ->
                 provider=prov,
             )
 
-            # ── Verifica imediatamente se foi salvo no lugar certo ──
+            # ── Immediately verify if saved in correct place ──
             bundle_meta = Path(skill_dir) / "skills" / meta.id / "meta.json"
             legacy_meta = Path(skill_dir) / "skills" / f"{meta.id}.json"
 
@@ -159,13 +159,13 @@ async def embed_all_skills(skill_dir: str, api_key: str, local: bool = False) ->
                     for p in vectors.values()
                 )
                 if found_in_bundle:
-                    print(f"    ✓ Bundle atualizado: dim=1536, norma=1.000")
+                    print(f"    ✓ Bundle updated: dim=1536, norm=1.000")
                 else:
-                    print(f"    ⚠ AVISO: bundle existe mas vetor 1536d não encontrado!")
+                    print(f"    ⚠ WARNING: bundle exists but 1536d vector not found!")
             elif legacy_meta.exists():
-                print(f"    ⚠ Salvo em legado ({meta.id}.json) — sem bundle")
+                print(f"    ⚠ Saved in legacy ({meta.id}.json) — no bundle")
             else:
-                print(f"    ✗ ERRO: arquivo não encontrado após save!")
+                print(f"    ✗ ERROR: file not found after save!")
                 results["failed"].append(meta.id)
                 continue
 
@@ -173,45 +173,45 @@ async def embed_all_skills(skill_dir: str, api_key: str, local: bool = False) ->
             await asyncio.sleep(0.5)
 
         except Exception as e:
-            print(f"    ✗ Erro: {e}")
+            print(f"    ✗ Error: {e}")
             results["failed"].append(meta.id)
 
-    # ── Verificação final de persistência ──
-    print(f"\n  Verificando persistência no disco...")
+    # ── Final persistence verification ──
+    print(f"\n  Verifying persistence on disk...")
     verify = verify_embeddings_persisted(skill_dir, expected_dim=1536)
-    print(f"  Bundles encontrados: {verify['total_bundles']}")
-    print(f"  Com vetor 1536d:     {verify['have_vector']}/{verify['total_bundles']}")
+    print(f"  Bundles found: {verify['total_bundles']}")
+    print(f"  With 1536d vector:     {verify['have_vector']}/{verify['total_bundles']}")
     if verify["missing_vector"]:
-        print(f"  Sem vetor 1536d:     {verify['missing_vector']}")
-    print(f"  Dimensões no disco:  {verify['dims_found']}")
+        print(f"  Without 1536d vector:     {verify['missing_vector']}")
+    print(f"  Dimensions on disk:  {verify['dims_found']}")
     results["verify"] = verify
 
     return results
 
 
-# ─── Etapa 2: Re-treina o scorer ─────────────────────────────────────────────
+# ─── Stage 2: Re-train the scorer ─────────────────────────────────────────────
 
 async def retrain_scorer(skill_dir: str, api_key: str, epochs: int = 80, local: bool = False) -> dict:
     """
-    Regenera o dataset e treina o PathScorerModel.
-    Detecta automaticamente a dimensão das skills válidas.
+    Regenerates the dataset and trains the PathScorerModel.
+    Automatically detects the dimension of valid skills.
     """
     from bootstrap_data import generate_bootstrap_dataset, save_dataset
     from openskill.core.trainer import train_path_scorer, evaluate_scorer
 
-    # ── Detecta dimensão atual dos bundles ──
+    # ── Detect current bundle dimension ──
     verify = verify_embeddings_persisted(skill_dir, expected_dim=1536)
     n_valid = verify["have_vector"]
-    print(f"\n  Skills com vetores 1536d: {n_valid}/{verify['total_bundles']}")
+    print(f"\n  Skills with 1536d vectors: {n_valid}/{verify['total_bundles']}")
 
     if n_valid < 2:
-        print(f"  ERRO: Precisa de pelo menos 2 skills com 1536d para treinar.")
-        print(f"  Execute a etapa de embed primeiro.")
-        return {"best_loss": None, "error": "insuficiente skills com 1536d"}
+        print(f"  ERROR: Need at least 2 skills with 1536d to train.")
+        print(f"  Run embed stage first.")
+        return {"best_loss": None, "error": "insufficient skills with 1536d"}
 
     cache_path = Path("train_data_retrain.npz")
 
-    print(f"\n  Gerando dataset (forçando regen com embed_dim=1536)...")
+    print(f"\n  Generating dataset (forcing regen with embed_dim=1536)...")
     provider = "local" if local else "openai"
     target_dim = 384 if local else 1536
 
@@ -226,26 +226,26 @@ async def retrain_scorer(skill_dir: str, api_key: str, epochs: int = 80, local: 
     )
     save_dataset(train_data, val_data, str(cache_path))
 
-    # Valida dimensão real do dataset gerado
+    # Validate actual dimension of generated dataset
     if train_data:
         actual_dim = train_data[0][0].shape[0]
-        print(f"  Dimensão real do dataset: {actual_dim}d")
+        print(f"  Actual dataset dimension: {actual_dim}d")
         if actual_dim != 1536:
-            print(f"  ⚠ AVISO: dataset em {actual_dim}d em vez de 1536d!")
-            print(f"  Isso significa que o bootstrap ainda não encontrou os vetores 1536d.")
+            print(f"  ⚠ WARNING: dataset in {actual_dim}d instead of 1536d!")
+            print(f"  This means bootstrap still hasn't found 1536d vectors.")
     else:
-        print(f"  ERRO: dataset vazio!")
-        return {"best_loss": None, "error": "dataset vazio"}
+        print(f"  ERROR: empty dataset!")
+        return {"best_loss": None, "error": "dataset empty"}
 
     pos = sum(1 for s in train_data if s[2])
     neg = len(train_data) - pos
-    print(f"  Dataset: {len(train_data)} treino | {len(val_data)} validação")
-    print(f"  Positivos: {pos} ({pos/max(len(train_data),1)*100:.1f}%)")
-    print(f"  Negativos: {neg}")
+    print(f"  Dataset: {len(train_data)} train | {len(val_data)} validation")
+    print(f"  Positives: {pos} ({pos/max(len(train_data),1)*100:.1f}%)")
+    print(f"  Negatives: {neg}")
 
     embed_dim = train_data[0][0].shape[0]
     save_path = str(Path(skill_dir) / "path_scorer.safetensors")
-    print(f"\n  Treinando por {epochs} epochs (dim={embed_dim}d)...")
+    print(f"\n  Training for {epochs} epochs (dim={embed_dim}d)...")
 
     metrics = await train_path_scorer(
         train_data=train_data,
@@ -265,12 +265,12 @@ async def retrain_scorer(skill_dir: str, api_key: str, epochs: int = 80, local: 
     return metrics
 
 
-# ─── Etapa 3: Testa o sistema ─────────────────────────────────────────────────
+# ─── Stage 3: Test the system ─────────────────────────────────────────────────
 
 async def test_system(skill_dir: str, api_key: str) -> dict:
     """
-    Executa queries de teste e verifica se o sistema está funcionando.
-    Recarrega o scorer do disco para garantir que usa o novo treinado.
+    Executes test queries and verifies system operation.
+    Reloads scorer from disk to ensure it uses the newly trained one.
     """
     import os
     os.environ["OPENROUTER_API_KEY"] = api_key
@@ -283,20 +283,20 @@ async def test_system(skill_dir: str, api_key: str) -> dict:
     llm = OpenRouterProvider(api_key=api_key)
     client = OpenSkillClient(store=store, llm=llm)
 
-    # Força recarga do scorer do disco
+    # Force reload of scorer from disk
     client._graph = None
     graph = client.graph
     graph._load_scorer()
 
     scorer_loaded = graph._neural_scorer is not None
     scorer_dim = graph._neural_scorer.embed_dim if scorer_loaded else None
-    print(f"\n  Scorer carregado: {'✓' if scorer_loaded else '✗'}")
+    print(f"\n  Scorer loaded: {'✓' if scorer_loaded else '✗'}")
     if scorer_loaded:
-        print(f"  Embed dim do scorer: {scorer_dim}d")
+        print(f"  Scorer embed dim: {scorer_dim}d")
         if scorer_dim != 1536:
-            print(f"  ⚠ AVISO: scorer em {scorer_dim}d mas skills em 1536d — dimensões não batem!")
-            print(f"  O scorer vai cair no fallback manual (confidence=0.00)")
-            print(f"  Execute a etapa de retrain para corrigir.")
+            print(f"  ⚠ WARNING: scorer in {scorer_dim}d but skills in 1536d — dimensions mismatch!")
+            print(f"  Scorer will fall back to manual (confidence=0.00)")
+            print(f"  Run retrain stage to fix.")
 
     test_queries = [
         "Calculate the Fibonacci sequence using memoization",
@@ -335,11 +335,11 @@ async def test_system(skill_dir: str, api_key: str) -> dict:
         results.append(r)
 
         conf_icon = "✓" if guidance.confidence > 0.35 else ("~" if guidance.confidence > 0.10 else "✗")
-        alpha_status = "uniforme" if alphas_uniform else "discriminativo ✓"
+        alpha_status = "uniform" if alphas_uniform else "discriminative ✓"
         print(f"    {conf_icon} Confidence: {guidance.confidence:.4f}")
         print(f"    Alphas: {[f'{a:.3f}' for a in guidance.skill_alphas]} ({alpha_status})")
         print(f"    Top skills: {top_skills[:2]}")
-        print(f"    Latência: {r['latency_ms']}ms")
+        print(f"    Latency: {r['latency_ms']}ms")
 
     n_nonzero = sum(1 for r in results if r["confidence"] > 0)
     n_above_threshold = sum(1 for r in results if r["confidence"] > 0.35)
@@ -350,21 +350,21 @@ async def test_system(skill_dir: str, api_key: str) -> dict:
     print(f"  Scorer dim:           {scorer_dim}d")
     print(f"  Confidence > 0:       {n_nonzero}/{len(results)} queries")
     print(f"  Confidence > 0.35:    {n_above_threshold}/{len(results)} queries")
-    print(f"  Alphas discriminativos: {n_discriminative}/{len(results)} queries")
-    print(f"  Confidence média:     {avg_conf:.4f}")
+    print(f"  Discriminative alphas: {n_discriminative}/{len(results)} queries")
+    print(f"  Avg confidence:     {avg_conf:.4f}")
 
     if avg_conf > 0.35:
-        print(f"\n  ✓ SISTEMA FUNCIONANDO — scorer discriminando bem")
+        print(f"\n  ✓ SYSTEM OPERATIONAL — scorer discriminating well")
     elif avg_conf > 0.10:
-        print(f"\n  ~ PARCIAL — scorer ativo mas confidence baixa")
-        print(f"    → Adicione skills de domínios diferentes para aumentar o contraste")
-        print(f"    → Ou aumente os epochs: --epochs 150")
+        print(f"\n  ~ PARTIAL — scorer active but confidence low")
+        print(f"    → Add skills from different domains to increase contrast")
+        print(f"    → Or increase epochs: --epochs 150")
     elif scorer_dim and scorer_dim != 1536:
-        print(f"\n  ✗ DIMENSÃO ERRADA — scorer em {scorer_dim}d, skills em 1536d")
-        print(f"    → Re-execute sem --skip-train para retreinar em 1536d")
+        print(f"\n  ✗ WRONG DIMENSION — scorer in {scorer_dim}d, skills in 1536d")
+        print(f"    → Re-execute without --skip-train to retrain in 1536d")
     else:
-        print(f"\n  ✗ SCORER INATIVO — verifique se o embed foi concluído")
-        print(f"    → Execute sem --skip-embed para re-embedar as skills")
+        print(f"\n  ✗ SCORER INACTIVE — verify if embed was completed")
+        print(f"    → Execute without --skip-embed to re-embed skills")
 
     return {
         "results": results,
@@ -385,33 +385,33 @@ async def main(args):
     start = time.time()
     summary = {}
 
-    # Etapa 1: Embed
+    # Stage 1: Embed
     if not args.skip_embed:
-        print("\n[ETAPA 1/3] Embedding de todas as skills (1536d)...")
+        print("\n[STAGE 1/3] Embedding all skills (1536d)...")
         print("-"*52)
         embed_result = await embed_all_skills(args.skill_dir, args.api_key, args.local)
         summary["embed"] = embed_result
         verify = embed_result.get("verify", {})
         n_valid = verify.get("have_vector", 0)
         n_total = verify.get("total_bundles", 0)
-        print(f"\n  Resultado embed: {embed_result['embedded']} novos | "
-              f"{embed_result['skipped']} já tinham | "
-              f"{len(embed_result['failed'])} falhas")
-        print(f"  Verificação disco: {n_valid}/{n_total} skills com vetor 1536d")
+        print(f"\n  Embed result: {embed_result['embedded']} new | "
+              f"{embed_result['skipped']} already had | "
+              f"{len(embed_result['failed'])} failures")
+        print(f"  Disk verification: {n_valid}/{n_total} skills with 1536d vector")
 
         if n_valid < 2:
-            print(f"\n  ERRO CRÍTICO: apenas {n_valid} skill(s) com vetor 1536d no disco.")
-            print(f"  Verifique se local.py foi atualizado corretamente.")
-            print(f"  O arquivo local.py precisa estar em: openskill/storage/local.py")
+            print(f"\n  CRITICAL ERROR: only {n_valid} skill(s) with 1536d vector on disk.")
+            print(f"  Verify if local.py was updated correctly.")
+            print(f"  The local.py file must be in: openskill/storage/local.py")
             sys.exit(1)
     else:
-        print("\n[ETAPA 1/3] Embed pulado (--skip-embed)")
+        print("\n[STAGE 1/3] Embed skipped (--skip-embed)")
         verify = verify_embeddings_persisted(args.skill_dir, expected_dim=1536)
-        print(f"  Skills com 1536d no disco: {verify['have_vector']}/{verify['total_bundles']}")
+        print(f"  Skills with 1536d on disk: {verify['have_vector']}/{verify['total_bundles']}")
 
-    # Etapa 2: Re-treina
+    # Stage 2: Re-train
     if not args.skip_train:
-        print(f"\n[ETAPA 2/3] Re-treinando o scorer (epochs={args.epochs})...")
+        print(f"\n[STAGE 2/3] Re-training the scorer (epochs={args.epochs})...")
         print("-"*52)
         train_result = await retrain_scorer(args.skill_dir, args.api_key, args.epochs, args.local)
         summary["train"] = train_result
@@ -419,21 +419,21 @@ async def main(args):
             print(f"\n  Best loss:    {train_result['best_loss']:.4f}")
             print(f"  Embed dim:    {train_result.get('embed_dim_used', '?')}d")
     else:
-        print("\n[ETAPA 2/3] Re-treino pulado (--skip-train)")
+        print("\n[STAGE 2/3] Retrain skipped (--skip-train)")
 
-    # Etapa 3: Testa
-    print("\n[ETAPA 3/3] Testando o sistema com queries reais...")
+    # Stage 3: Test
+    print("\n[STAGE 3/3] Testing the system with real queries...")
     print("-"*52)
     test_result = await test_system(args.skill_dir, args.api_key)
     summary["test"] = test_result
 
-    # Resultado final
+    # Final result
     elapsed = time.time() - start
     print(f"\n{'='*62}")
-    print(f"  PIPELINE CONCLUÍDO em {elapsed:.1f}s")
+    print(f"  PIPELINE COMPLETED in {elapsed:.1f}s")
     print(f"{'='*62}")
 
-    # Salva relatório
+    # Save report
     report_path = Path(args.skill_dir) / "pipeline_report.json"
     with open(report_path, "w", encoding="utf-8") as f:
         def serialize(obj):
@@ -445,27 +445,27 @@ async def main(args):
                 return sorted(obj)
             return str(obj)
         json.dump(summary, f, indent=2, default=serialize)
-    print(f"\n  Relatório salvo em: {report_path}")
+    print(f"\n  Report saved to: {report_path}")
 
     return summary
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Pipeline completo: Embed + Retrain + Test do OpenSkill",
+        description="Full pipeline: Embed + Retrain + Test for OpenSkill",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument("--api-key", required=True, help="OpenRouter API key")
-    parser.add_argument("--skill-dir", default="./skills_output", help="Pasta das skills")
-    parser.add_argument("--epochs", type=int, default=80, help="Epochs de treino (default: 80)")
-    parser.add_argument("--skip-embed", action="store_true", help="Pula a etapa de embedding")
-    parser.add_argument("--skip-train", action="store_true", help="Pula o re-treino")
-    parser.add_argument("--local", action="store_true", help="Força uso de modelo local 384d em todo o pipeline")
+    parser.add_argument("--skill-dir", default="./skills_output", help="Skills folder")
+    parser.add_argument("--epochs", type=int, default=80, help="Training epochs (default: 80)")
+    parser.add_argument("--skip-embed", action="store_true", help="Skips embedding stage")
+    parser.add_argument("--skip-train", action="store_true", help="Skips retraining")
+    parser.add_argument("--local", action="store_true", help="Forces use of local 384d model throughout pipeline")
     args = parser.parse_args()
 
     if not Path(args.skill_dir).exists():
-        print(f"ERRO: '{args.skill_dir}' não encontrada.")
+        print(f"ERROR: '{args.skill_dir}' not found.")
         sys.exit(1)
 
     asyncio.run(main(args))

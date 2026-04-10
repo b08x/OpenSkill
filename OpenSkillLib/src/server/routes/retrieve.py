@@ -8,7 +8,7 @@ router = APIRouter()
 class RetrieveRequest(BaseModel):
     query: str
     top_k: int = 3
-    mode: str = "auto"  # "injection" ou "verbalization"
+    mode: str = "auto"  # "injection" or "verbalization"
 
 
 @router.post("/")
@@ -16,7 +16,7 @@ async def retrieve_guidance(req: RetrieveRequest, request: Request):
     client = request.app.state.client
 
     try:
-        # 1. Recuperação S-Path-RAG + TurboQuant
+        # 1. S-Path-RAG + TurboQuant Retrieval
         guidance = await client.retriever.retrieve(req.query, top_k=req.top_k)
 
         response_data = {
@@ -27,7 +27,7 @@ async def retrieve_guidance(req: RetrieveRequest, request: Request):
             "best_path": guidance.best_path_ids
         }
 
-        # 2. Geração (Se o modelo local estiver carregado, faz Injeção Vetorial)
+        # 2. Generation (If local model is loaded, performs Vector Injection)
         if hasattr(client.llm, 'generate_with_guidance'):
             gen_resp = await client.llm.generate_with_guidance(
                 query=req.query,

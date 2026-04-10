@@ -1,12 +1,12 @@
 """
 verifier.py — EvoSkills: Surrogate Verifier & Sandbox Execution
 ================================================================
-CORREÇÕES:
-  1. diagnostic nunca mais vazio — captura stdout + stderr + returncode
-  2. Sandbox isolado com sys.path limpo para evitar import side-effects
-  3. Timeout com mensagem clara
-  4. Wrapping robusto: código do skill + testes em namespace separado
-  5. Detecção de função principal automática para os asserts
+FIXES:
+  1. diagnostic never empty again — captures stdout + stderr + returncode
+  2. Isolated sandbox with clean sys.path to avoid import side-effects
+  3. Timeout with clear message
+  4. Robust wrapping: skill code + tests in separate namespace
+  5. Automatic main function detection for asserts
 """
 
 from __future__ import annotations
@@ -54,12 +54,12 @@ VERIFIER_TEST_TEMPLATE = (
     "assert {func_hint}(1) == 1\n"
 )
 
-# Template do script completo que roda no subprocess
+# Template of the full script that runs in the subprocess
 SANDBOX_TEMPLATE = '''\
 import sys
 import os
 
-# Isola o sandbox do projeto principal
+# Isolates sandbox from main project
 _project_paths = [p for p in sys.path if "OpenSkill" in p or "openskill" in p.lower()]
 for _p in _project_paths:
     try:
@@ -86,7 +86,7 @@ else:
     sys.exit(1)
 '''
 
-# Wrapper para cada assert — captura falhas individualmente
+# Wrapper for each assert — captures failures individually
 ASSERT_WRAPPER = '''\
 try:
     {assert_line}
@@ -98,16 +98,16 @@ except Exception as _e:
 
 
 def _extract_func_hint(skill_code: str) -> str:
-    """Tenta adivinhar o nome da função principal no código."""
+    """Attempts to guess the main function name in the code."""
     import re
-    # Procura 'def nome(' no código
+    # Searches for 'def name(' in code
     matches = re.findall(r'def\s+(\w+)\s*\(', skill_code)
     if not matches:
         return "solution"
-    # Prefere nomes que não são helpers (não começam com _)
+    # Prefers non-helper names (not starting with _)
     public = [m for m in matches if not m.startswith("_")]
     if public:
-        # Prefere nomes relacionados à tarefa
+        # Prefers task-related names
         for name in public:
             if any(kw in name.lower() for kw in ["fibonacci", "fib", "solution", "calc", "compute"]):
                 return name
@@ -116,7 +116,7 @@ def _extract_func_hint(skill_code: str) -> str:
 
 
 def _wrap_asserts(test_code: str) -> str:
-    """Envolve cada linha de assert em try/except para diagnóstico individual."""
+    """Wraps each assert line in try/except for individual diagnostics."""
     lines = []
     for line in test_code.strip().split("\n"):
         stripped = line.strip()
@@ -124,7 +124,7 @@ def _wrap_asserts(test_code: str) -> str:
             wrapped = ASSERT_WRAPPER.format(assert_line=stripped)
             lines.append(textwrap.indent(wrapped, ""))
         elif stripped and not stripped.startswith("#"):
-            # Linhas que não são assert (ex: variáveis auxiliares) — mantém direto
+            # Lines that are not asserts (e.g., auxiliary variables) — kept directly
             lines.append(line)
     return "\n".join(lines) if lines else test_code
 
@@ -135,8 +135,8 @@ class SurrogateVerifier:
 
     async def generate_tests(self, task: str, skill_code: str = "") -> str:
         """
-        Gera o script de teste (verifier test suite V).
-        Usa o código da skill para inferir o nome da função principal.
+        Generates the test script (verifier test suite V).
+        Uses skill code to infer the main function name.
         """
         func_hint = _extract_func_hint(skill_code) if skill_code else "solution"
 
@@ -156,22 +156,22 @@ class SurrogateVerifier:
 
     def evaluate_in_sandbox(self, skill_code: str, test_code: str) -> Tuple[bool, str]:
         """
-        Executa skill_code + test_code em subprocess isolado.
+        Executes skill_code + test_code in an isolated subprocess.
 
-        Retorna:
+        Returns:
             (success: bool, diagnostic: str)
-            diagnostic é SEMPRE não-vazio em caso de falha.
+            diagnostic is ALWAYS non-empty on failure.
         """
         if not skill_code or not skill_code.strip():
-            return False, "DIAGNOSTIC: Skill code está vazio — nenhum código foi gerado."
+            return False, "DIAGNOSTIC: Skill code is empty — no code was generated."
 
         if not test_code or not test_code.strip():
-            return False, "DIAGNOSTIC: Test code está vazio — nenhum teste foi gerado."
+            return False, "DIAGNOSTIC: Test code is empty — no test was generated."
 
-        # Envolve asserts em try/except para diagnóstico granular
+        # Wraps asserts in try/except for granular diagnostics
         wrapped_tests = _wrap_asserts(test_code)
 
-        # Monta o script completo
+        # Assembles the complete script
         script = SANDBOX_TEMPLATE.format(
             skill_code=skill_code,
             indented_tests=wrapped_tests,
@@ -189,9 +189,9 @@ class SurrogateVerifier:
                 capture_output=True,
                 text=True,
                 timeout=15,
-                # Roda no diretório temp para evitar imports acidentais do projeto
+                # Runs in temp directory to avoid accidental project imports
                 cwd=tempfile.gettempdir(),
-                env={**os.environ, "PYTHONPATH": ""},  # limpa PYTHONPATH
+                env={**os.environ, "PYTHONPATH": ""},  # clears PYTHONPATH
             )
 
             stdout = (result.stdout or "").strip()
@@ -207,7 +207,7 @@ class SurrogateVerifier:
             if result.returncode == 0 and "SANDBOX_OK" in stdout:
                 return True, "Passed"
 
-            # Monta diagnóstico detalhado — NUNCA vazio
+            # Assembles detailed diagnostics — NEVER empty
             parts = []
             if stdout:
                 parts.append(f"STDOUT:\n{stdout}")
@@ -215,12 +215,12 @@ class SurrogateVerifier:
                 parts.append(f"STDERR:\n{stderr}")
             if not parts:
                 parts.append(
-                    f"DIAGNOSTIC: Processo retornou código {result.returncode} sem output.\n"
-                    "Possíveis causas:\n"
-                    "  1. SyntaxError no código gerado\n"
-                    "  2. Import de módulo não instalado\n"
-                    "  3. Erro de indentação\n"
-                    f"Script executado:\n{script[:500]}..."
+                    f"DIAGNOSTIC: Process returned code {result.returncode} with no output.\n"
+                    "Possible causes:\n"
+                    "  1. SyntaxError in generated code\n"
+                    "  2. Uninstalled module import\n"
+                    "  3. Indentation error\n"
+                    f"Executed script:\n{script[:500]}..."
                 )
 
             diagnostic = "\n".join(parts)
@@ -228,11 +228,11 @@ class SurrogateVerifier:
 
         except subprocess.TimeoutExpired:
             return False, (
-                "DIAGNOSTIC: Timeout (15s) — código provavelmente tem loop infinito.\n"
-                "Verifique se a condição de parada da recursão está correta."
+                "DIAGNOSTIC: Timeout (15s) — code likely has an infinite loop.\n"
+                "Check if the recursion stop condition is correct."
             )
         except Exception as e:
-            return False, f"DIAGNOSTIC: Erro ao executar sandbox: {type(e).__name__}: {e}"
+            return False, f"DIAGNOSTIC: Error executing sandbox: {type(e).__name__}: {e}"
         finally:
             try:
                 os.unlink(tmp_path)
@@ -240,10 +240,10 @@ class SurrogateVerifier:
                 pass
 
     def _extract_python_code(self, text: str) -> str:
-        """Extrai apenas o bloco de código do markdown."""
+        """Extracts only the code block from markdown."""
         import re
         m = re.search(r'```python\s*(.*?)\s*```', text, re.DOTALL)
         if m:
             return m.group(1).strip()
-        # Fallback: retorna o texto todo se não tiver bloco markdown
+        # Fallback: returns full text if no markdown block exists
         return text.strip()

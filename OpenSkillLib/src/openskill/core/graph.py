@@ -1,14 +1,14 @@
 """
 graph.py — S-Path-RAG: Semantic Skill Graph Retrieval
 =====================================================
-Alterações em relação à versão anterior:
+Changes from previous version:
 
-  - SkillPath.node_scores: list[float]  (NOVO — Eq 4 × Eq 5)
-  - _score_path modo neural: calcula alpha_p = w_tilde_p * v_eta_p por nó
-  - _score_path guarda resultado em self._last_node_scores para find_paths ler
-  - find_paths: popula SkillPath.node_scores com os alphas calculados
+  - SkillPath.node_scores: list[float]  (NEW — Eq 4 × Eq 5)
+  - _score_path neural mode: calculates alpha_p = w_tilde_p * v_eta_p per node
+  - _score_path stores result in self._last_node_scores for find_paths to read
+  - find_paths: populates SkillPath.node_scores with calculated alphas
 
-Nenhuma interface pública foi quebrada.
+No public interface was broken.
 """
 
 from __future__ import annotations
@@ -42,8 +42,8 @@ EDGE_WEIGHTS = {
 class SkillPath:
     node_ids: list[str]
     score: float = 0.0
-    # Eq 4 × Eq 5: alpha_p = softmax(u_p) * v_eta_p, normalizado por nó
-    # Usado por aggregate_path_vectors para a mixture ponderada real
+    # Eq 4 × Eq 5: alpha_p = softmax(u_p) * v_eta_p, normalized per node
+    # Used by aggregate_path_vectors for true weighted mixture
     node_scores: list[float] = field(default_factory=list)
 
 
@@ -59,23 +59,23 @@ class SkillGraph:
     def __init__(self, store: BaseSkillStore):
         self.store = store
         self._neural_scorer = None
-        self._last_node_scores: list[float] = []   # cache entre _score_path e find_paths
+        self._last_node_scores: list[float] = []   # cache between _score_path and find_paths
         self._load_scorer()
 
     def _load_scorer(self):
-        """Tenta carregar o scorer treinado do disco (auto-detecta dimensão)."""
+        """Attempts to load the trained scorer from disk (auto-detects dimension)."""
         from openskill.core.trainer import PathScorerModel
         import safetensors.torch
         try:
             model_path = self.store.workspace_path / "path_scorer.safetensors"
             if model_path.exists():
-                # 1. Descobre a dimensão real lendo os pesos da 1ª camada (trunk.0.weight)
+                # 1. Discover real dimension by reading 1st layer weights (trunk.0.weight)
                 with safetensors.safe_open(model_path, framework="pt") as f:
                     tensor_shape = f.get_tensor("trunk.0.weight").shape
-                    # A entrada é embed_dim * 2, então a dimensão real é shape[1] / 2
+                    # Input is embed_dim * 2, so real dimension is shape[1] / 2
                     real_dim = tensor_shape[1] // 2
 
-                # 2. Carrega o modelo com a dimensão correta
+                # 2. Load the model with correct dimension
                 self._neural_scorer = PathScorerModel(embed_dim=real_dim)
                 self._neural_scorer.load_state_dict(safetensors.torch.load_file(model_path))
                 self._neural_scorer.eval()
@@ -86,7 +86,7 @@ class SkillGraph:
     async def find_paths(
             self,
             query_vec: np.ndarray,
-            query_text: str, # NOVO: Recebe o texto original
+            query_text: str, # NEW: Receives original text
             top_k: int = 3,
             use_gnn: bool = False
     ) -> GraphRetrievalResult:
@@ -138,18 +138,18 @@ class SkillGraph:
 
         for m in metas:
             target_vec = None
-            # Garante acesso via atributo (classe SkillMetadata)
+            # Ensures access via attribute (SkillMetadata class)
             skill_id = getattr(m, 'id', 'unknown')
             title = getattr(m, 'title', '').lower()
 
-            # DEBUG: Agora usamos getattr para evitar AttributeError
-            print(f"[DEBUG RETRIEVAL] Analisando skill: {getattr(m, 'title', 'sem titulo')}")
-            print(f"  Keywords da query: {query_keywords}")
+            # DEBUG: Now using getattr to avoid AttributeError
+            print(f"[DEBUG RETRIEVAL] Analyzing skill: {getattr(m, 'title', 'no title')}")
+            print(f"  Query keywords: {query_keywords}")
             vectors = getattr(m, 'vectors', {})
 
             if isinstance(vectors, dict):
                 for profile in vectors.values():
-                    # Acessa dimensão e embedding de forma segura
+                    # Safe access for dimension and embedding
                     p_dim = getattr(profile, 'dimension', 0) if not isinstance(profile, dict) else profile.get(
                         'dimension', 0)
                     p_emb = getattr(profile, 'embedding', None) if not isinstance(profile, dict) else profile.get(
@@ -159,13 +159,13 @@ class SkillGraph:
                         target_vec = np.array(p_emb)
                         break
 
-            # Fallback raiz
+            # Root fallback
             if target_vec is None:
                 m_emb = getattr(m, 'embedding', None)
                 if m_emb is not None and len(m_emb) == query_dim:
                     target_vec = np.array(m_emb)
 
-            # --- Score Híbrido ---
+            # --- Hybrid Score ---
             if target_vec is not None:
                 norm_q = np.linalg.norm(query_vec) + 1e-8
                 norm_t = np.linalg.norm(target_vec) + 1e-8
@@ -181,10 +181,10 @@ class SkillGraph:
                 combined_seed_score = (vector_sim * 0.4) + (lexical_sim * 0.6)
                 scores.append((skill_id, combined_seed_score))
             else:
-                # Log opcional para debug se quiser ver qual skill está sem vetor
+                # Optional debug log if you want to see which skill lacks a vector
                 # log.debug("graph.seed_no_matching_dim", skill=skill_id)
                 pass
-        # debug removido — m é SkillMetadata, não dict
+        # debug removed — m is SkillMetadata, not dict
         scores.sort(key=lambda x: x[1], reverse=True)
         return [s[0] for s in scores[:top_k] if s[0]]
 
@@ -204,16 +204,16 @@ class SkillGraph:
             m = meta_map.get(nid)
             if not m: continue
 
-            # Bonus Léxico no Path Score
+            # Lexical Bonus in Path Score
             title = (getattr(m, 'title', '') or '').lower()
             if title and query_keywords:
                 title_words = set(title.lower().split())
                 overlap = query_keywords.intersection(title_words)
                 if overlap:
-                    # Aumentamos o bônus léxico para 0.4
+                    # Increased lexical bonus to 0.4
                     lexical_bonus += (len(overlap) / len(query_keywords)) * 0.4
 
-            # Extração de vetor igual ao _get_seeds
+            # Vector extraction same as _get_seeds
             target_emb = None
             vectors_data = getattr(m, 'vectors', {})
             if isinstance(vectors_data, dict):
@@ -233,14 +233,14 @@ class SkillGraph:
         if not path_vecs:
             return 0.0
 
-        # ── MODO NEURAL: Eq 3 + Eq 4 + alpha_p ──────────────────────────────
+        # ── NEURAL MODE: Eq 3 + Eq 4 + alpha_p ──────────────────────────────
         if self._neural_scorer is not None and query_dim == self._neural_scorer.embed_dim:
             with torch.no_grad():
                 device = next(self._neural_scorer.parameters()).device
                 q_t = torch.tensor(query_vec, dtype=torch.float32).to(device)
 
-                # Scorer e verifier POR NÓ (não pela média do path)
-                per_node_u = []  # u_p: score bruto (Eq 3)
+                # Scorer and verifier PER NODE (not path average)
+                per_node_u = []  # u_p: raw score (Eq 3)
                 per_node_veta = []  # v_eta(p,q): verifier ∈ (0,1)
 
                 for pv in path_vecs:
@@ -253,14 +253,14 @@ class SkillGraph:
                 u = torch.stack(per_node_u)  # [N]
                 v_eta = torch.stack(per_node_veta)  # [N]
 
-                # Eq 4: w_tilde_p = softmax(u_p / tau), tau=1.0 na inferência
+                # Eq 4: w_tilde_p = softmax(u_p / tau), tau=1.0 at inference
                 w_tilde = torch.softmax(u, dim=0)  # [N]
 
                 # Eq 5: alpha_p ∝ w_tilde_p * v_eta_p
-                alpha = w_tilde * v_eta  # [N], não normalizado
-                alpha_norm = alpha / (alpha.sum() + 1e-8)  # normaliza → mixture coeffs
+                alpha = w_tilde * v_eta  # [N], not normalized
+                alpha_norm = alpha / (alpha.sum() + 1e-8)  # normalize → mixture coeffs
 
-                # Propaga os alphas para find_paths via self._last_node_scores
+                # Propagates alphas to find_paths via self._last_node_scores
                 self._last_node_scores = alpha_norm.cpu().tolist()
 
                 log.debug(
@@ -269,12 +269,12 @@ class SkillGraph:
                     alphas=[f"{a:.3f}" for a in self._last_node_scores],
                 )
 
-                # Path score global = sigmoid(u_mean) * v_eta_mean
+                # Global path score = sigmoid(u_mean) * v_eta_mean
                 path_score = float(torch.sigmoid(u.mean()) * v_eta.mean())
                 return path_score
 
-        # ── MODO MANUAL (fallback sem scorer) ────────────────────────────────
-        # node_scores vazio → aggregate_path_vectors usará fallback uniforme
+        # ── MANUAL MODE (fallback without scorer) ────────────────────────────────
+        # node_scores empty → aggregate_path_vectors will use uniform fallback
         self._last_node_scores = []
         semantic = np.mean(path_sims) if path_sims else 0.0
 
@@ -290,7 +290,7 @@ class SkillGraph:
         structural = np.mean(edge_weights) if edge_weights else 1.0
         diversity = min(len(categories) / 3.0, 1.0)
 
-        # O score final agora soma o bonus léxico e limita em 1.0
+        # Final score now adds lexical bonus and caps at 1.0
         final_score = (0.2 * structural) + (0.3 * semantic) + (0.1 * diversity) + lexical_bonus
         return float(min(final_score, 1.0))
 
@@ -331,7 +331,7 @@ class SkillGraph:
 
     async def update_skill_node(self, skill_id: str, meta: dict, store: BaseSkillStore):
         graph = self.store.get_graph()
-        # Atualiza os dados do nó
+        # Updates node data
         graph.nodes[skill_id] = meta
         await self.store.update_graph(graph)
 
@@ -343,7 +343,7 @@ async def register_skill_in_graph(skill_id, meta, all_metas, store, use_gnn: boo
             return obj.get(key)
         return getattr(obj, key, None)
 
-    # Garante que temos um dicionário {id: meta}
+    # Ensures we have an {id: meta} dictionary
     if isinstance(all_metas, list):
         metas_dict = {m.id if hasattr(m, 'id') else m.get('id'): m for m in all_metas}
     else:
@@ -356,7 +356,7 @@ async def register_skill_in_graph(skill_id, meta, all_metas, store, use_gnn: boo
     }
 
     category = _val(meta, 'category') or "General"
-    # Usa o metas_dict agora
+    # Now uses metas_dict
     for sid, other_meta in metas_dict.items():
         if sid == skill_id:
             continue

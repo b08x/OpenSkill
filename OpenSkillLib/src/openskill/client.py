@@ -1,7 +1,7 @@
 """
-OpenSkillClient — API Unificada de Alto Nível
+OpenSkillClient — Unified High-Level API
 ==============================================
-A interface que TODO usuário final vai usar.
+The interface that EVERY end-user will use.
 
 from openskill import OpenSkillClient, LocalDiskStore
 
@@ -41,9 +41,9 @@ log = structlog.get_logger()
 
 class OpenSkillClient:
     """
-    Cliente unificado que abstrai todo o pipeline.
+    Unified client that abstracts the entire pipeline.
 
-    Modo de uso mais comum:
+    Most common usage mode:
 
         from openskill import OpenSkillClient, LocalDiskStore
 
@@ -52,22 +52,22 @@ class OpenSkillClient:
             llm=OpenRouterProvider(api_key="sk-or-..."),
         )
 
-        # Criar skill via MemCollab
+        # Create skill via MemCollab
         skill = await client.craft(
             task="Implement Raft consensus protocol",
             weak_model="openai/gpt-4o-mini",
             strong_model="anthropic/claude-3-5-sonnet",
         )
 
-        # Buscar guidance via TurboQuant + S-Path-RAG
+        # Search guidance via TurboQuant + S-Path-RAG
         guidance = await client.retrieve(
             "How to handle network partitions in distributed systems?"
         )
 
-        # Evoluir skill via Trace2Skill
+        # Evolve skill via Trace2Skill
         evolved = await client.evolve(
             skill_id=skill.id,
-            trajectories=[...],  # ou tasks=[...] para auto-gerar
+            trajectories=[...],  # or tasks=[...] to auto-generate
         )
     """
 
@@ -81,27 +81,27 @@ class OpenSkillClient:
         default_strong_model: str = "anthropic/claude-3-5-sonnet",
         embed: bool = True,
     ):
-        # Storage: se não passou, usa LocalDiskStore por padrão
+        # Storage: if not provided, use LocalDiskStore by default
         self.store = store or LocalDiskStore(skill_dir)
 
-        # LLM Provider: se não passou, tenta OpenRouter (requer API key)
+        # LLM Provider: if not provided, try OpenRouter (requires API key)
         self.llm = llm
 
-        # Defaults de modelos
+        # Model defaults
         self.default_weak_model = default_weak_model
         self.default_strong_model = default_strong_model
 
         # Flags
         self.embed = embed
 
-        # Componentes internos (lazy)
+        # Internal components (lazy)
         self._crafter: Optional[SkillCrafter] = None
         self._evolver: Optional[SkillEvolver] = None
         self._quantizer: Optional[TurboQuantizer] = None
         self._graph: Optional[SkillGraph] = None
         self._retriever: Optional[OpenSkillRetriever] = None
 
-    # ── Lazy init dos componentes ─────────────────────────────────────────────
+    # ── Lazy init of components ─────────────────────────────────────────────
 
     @property
     def crafter(self) -> SkillCrafter:
@@ -133,46 +133,46 @@ class OpenSkillClient:
             self._retriever = OpenSkillRetriever(store=self.store, llm=self.llm)
         return self._retriever
 
-    # ── API Pública ──────────────────────────────────────────────────────────
+    # ── Public API ──────────────────────────────────────────────────────────
     async def prepare_quest_loadout(self, task_query: str) -> 'SkillLoadout':
         """
-        O processo de sentar na fogueira antes do Boss.
-        1. S-Path RAG busca o conhecimento no Grafo (Spellbook).
-        2. O Loadout (Hotbar) seleciona e equipa o que couber.
+        The process of sitting at the bonfire before the Boss.
+        1. S-Path RAG searches for knowledge in the Graph (Spellbook).
+        2. The Loadout (Hotbar) selects and equips whatever fits.
         """
-        # 1. Recupera as diretrizes do Grafo (S-Path RAG)
+        # 1. Retrieve guidelines from the Graph (S-Path RAG)
         guidance = await self.retriever.retrieve(task_query, top_k=5, use_graph=True)
 
-        # 2. Instancia a Hotbar
+        # 2. Instantiate the Hotbar
         loadout = SkillLoadout(max_active_slots=3, max_passive_slots=5)
 
-        # 3. Tenta equipar as skills retornadas (respeitando limites de slot)
+        # 3. Try to equip the returned skills (respecting slot limits)
         for i, skill_meta_dict in enumerate(guidance.skills_meta):
             meta = SkillMetadata.from_dict(skill_meta_dict)
             content = guidance.skill_contents[i]
 
-            # Caminho físico do código (EvoSkills Bundle)
+            # Physical code path (EvoSkills Bundle)
             code_path = str(self.store.skills_dir / meta.id / "scripts")
 
-            # Tenta equipar
+            # Try to equip
             loadout.equip(meta, content, code_path=code_path)
 
         return loadout
 
     async def execute_quest(self, task_query: str):
-        """O fluxo principal gamificado: Hotbar (Tokens) + Spellbook (Vetores Latentes)."""
+        """The main gamified flow: Hotbar (Tokens) + Spellbook (Latent Vectors)."""
         from openskill.llm.base import LLMMessage
 
-        # 1. Prepara a Hotbar (Decide o que vai pro Prompt e o que vai pra Geometria)
+        # 1. Prepare the Hotbar (Decide what goes to Prompt and what goes to Geometry)
         loadout = await self.prepare_quest_loadout(task_query)
 
         print(
-            f"\n[⚔️ Iniciando Quest com {len(loadout.equipped_active)} Skills Ativas e {len(loadout.equipped_passive)} Auras Passivas]")
+            f"\n[⚔️ Starting Quest with {len(loadout.equipped_active)} Active Skills and {len(loadout.equipped_passive)} Passive Auras]")
 
-        # 2. Extrai os vetores das skills PASSIVAS (Para "curvar a geometria do LLM")
+        # 2. Extract vectors from PASSIVE skills (To "bend the LLM geometry")
         passive_vectors = []
         for skill in loadout.equipped_passive:
-            # Busca o vetor do TurboQuant (Tratando como Objeto)
+            # Search for TurboQuant vector (Treating as Object)
             for profile_key, profile_data in skill.get('vectors', {}).items():
                 dim = getattr(profile_data, 'dimension', 0)
                 emb = getattr(profile_data, 'embedding', None)
@@ -181,13 +181,13 @@ class OpenSkillClient:
                     passive_vectors.append(emb)
                     break
 
-        # 3. Pega o "Manual de Instruções" das skills ATIVAS (Para o Prompt)
+        # 3. Get the "Instruction Manual" for ACTIVE skills (For the Prompt)
         active_prompt = loadout.generate_system_prompt_appendage()
 
         if active_prompt:
-            print(f"[🛡️ Hotbar] Equipando Scripts Ativos: {[s['title'] for s in loadout.equipped_active]}")
+            print(f"[🛡️ Hotbar] Equipping Active Scripts: {[s['title'] for s in loadout.equipped_active]}")
 
-        # 4. Constrói o Contexto do Agente
+        # 4. Build Agent Context
         system_content = "You are an AI Agent equipped with specialized skills to solve complex tasks."
         if active_prompt:
             system_content += f"\n{active_prompt}"
@@ -197,27 +197,27 @@ class OpenSkillClient:
             LLMMessage(role="user", content=task_query)
         ]
 
-        # 5. Vai pra batalha!
-        # Verifica se o LLM carregado suporta injeção vetorial (Cross-Attention/S-Path)
+        # 5. Go to battle!
+        # Check if the loaded LLM supports vector injection (Cross-Attention/S-Path)
         if hasattr(self.llm, 'generate_with_guidance') and passive_vectors:
             log.info("quest.execution", mode="S-PATH INJECTION + ACTIVE SKILLS")
             from openskill.retrieval.retriever import RetrievalGuidance
 
-            # Monta o objeto de orientação latente
+            # Assemble the latent orientation object
             guidance = RetrievalGuidance(
                 query=task_query,
                 best_path_ids=[s['id'] for s in loadout.equipped_passive],
                 skill_vectors=passive_vectors,
-                skill_alphas=[1.0 / len(passive_vectors)] * len(passive_vectors)  # Pesos iguais por enquanto
+                skill_alphas=[1.0 / len(passive_vectors)] * len(passive_vectors)  # Equal weights for now
             )
-            # O LocalSkillInjectedLLM cuidará da injeção vetorial + geração
+            # LocalSkillInjectedLLM will handle vector injection + generation
             response = await self.llm.generate_with_guidance(
                 query=task_query,
                 guidance=guidance,
                 mode="auto"
             )
         else:
-            # Fallback para OpenRouter/Ollama (Sem injeção vetorial, apenas Active Skills no prompt)
+            # Fallback for OpenRouter/Ollama (No vector injection, only Active Skills in prompt)
             log.info("quest.execution", mode="API FALLBACK (ACTIVE SKILLS ONLY)")
             response = await self.llm.generate(messages=messages, max_tokens=2000)
 
@@ -246,13 +246,13 @@ class OpenSkillClient:
         if self.llm is None:
             raise RuntimeError("LLM Provider not configured.")
 
-        # 1. Gerar trajetórias duplas (MemCollab)
+        # 1. Generate dual trajectories (MemCollab)
         weak_traj, strong_traj = await self.crafter.generate_trajectories(task, weak, strong)
 
-        # 2. Análise contrastiva (MemCollab)
+        # 2. Contrastive analysis (MemCollab)
         constraints = await self.crafter.contrastive_analysis(task, strong_traj, weak_traj)
 
-        # 3. O Loop de Co-Evolução (EvoSkills)
+        # 3. Co-Evolution Loop (EvoSkills)
         from openskill.core.verifier import SurrogateVerifier
         verifier = SurrogateVerifier(llm=self.llm)
 
@@ -260,34 +260,34 @@ class OpenSkillClient:
             task, constraints, strong_traj, verifier
         )
 
-        # (Aviso: Removi a linha velha `self.crafter.synthesize_skill` que estava aqui,
-        # pois ela ia sobrescrever o `skill_data` que acabou de ser evoluído no EvoSkills!)
+        # (Warning: Removed the old line `self.crafter.synthesize_skill` that was here,
+        # as it would overwrite the `skill_data` that was just evolved in EvoSkills!)
 
-        # 4. Classificação de tarefa
+        # 4. Task classification
         classification = await self.crafter.classify_task(task)
 
-        # 5. Renderizar Markdown (Conhecimento Semântico / SKILL.md)
+        # 5. Render Markdown (Semantic Knowledge / SKILL.md)
         skill_md = self.crafter.render_markdown(
             skill_data, task, weak, strong, weak_traj, strong_traj, constraints
         )
 
-        # 6. Construir metadados (A "Ficha do Personagem")
+        # 6. Build metadata (The "Character Sheet")
         from openskill.storage.base import SkillType
-        from openskill.core.crafter import _slugify  # Importe o slugify que criamos
+        from openskill.core.crafter import _slugify  # Import slugify we created
 
-        # NOVO: O ID da skill agora é o nome legível no padrão Agent Skills!
+        # NEW: The skill ID is now the readable name in the Agent Skills standard!
         raw_title = skill_data.get("title", "skill")
         sid = _slugify(raw_title)
 
         safe_title = "".join(c if c.isalnum() or c in "-_" else "_" for c in skill_data.get("title", "skill"))[:40]
 
-        # Determina a taxonomia RPG baseada na existência de código gerado
+        # Determine RPG taxonomy based on the existence of generated code
         s_type = SkillType.HYBRID if executable_code else SkillType.PASSIVE
 
         meta = SkillMetadata(
             id=sid,
             title=skill_data.get("title", "Unnamed"),
-            skill_type=s_type,  # Define como a skill vai ser tratada pela Hotbar
+            skill_type=s_type,  # Defines how the skill will be treated by the Hotbar
             domain=skill_data.get("domain", "General"),
             category=classification.get("category", "General"),
             subcategory=classification.get("subcategory", "General"),
@@ -297,31 +297,31 @@ class OpenSkillClient:
             strong_model=strong,
             evolution_count=0,
             trajectory_count=2,
-            level=1  # Nível Inicial
+            level=1  # Initial Level
         )
 
-        # 7. Salvar o Skill Bundle Multi-arquivo
+        # 7. Save Multi-file Skill Bundle
         if hasattr(self.store, 'save_skill_bundle'):
             await self.store.save_skill_bundle(sid, skill_md, meta, executable_code)
         else:
             await self.store.save_skill(sid, skill_md, meta)  # Fallback
 
-        # 8. Embedding TurboQuant + registro no grafo
+        # 8. TurboQuant Embedding + register in graph
         if do_embed:
 
-            # 1. Recupera lista de skills (que é uma LISTA de SkillMetadata)
+            # 1. Retrieve list of skills (which is a LIST of SkillMetadata)
             all_metas = await self.store.list_skills()
 
-            # 2. Converte para dicionário {id: meta} como o graph.py espera
+            # 2. Convert to dictionary {id: meta} as graph.py expects
             all_metas_dict = {m.id: m.to_dict() for m in all_metas}
 
-            # 3. Registra
+            # 3. Register
             await self._embed_and_register(sid, skill_md, meta)
 
             await register_skill_in_graph(
                 skill_id=sid,
                 meta=meta,
-                all_metas=all_metas_dict,  # Passamos o dict agora
+                all_metas=all_metas_dict,  # Passing the dict now
                 store=self.store,
                 use_gnn=False
             )
@@ -339,14 +339,14 @@ class OpenSkillClient:
     ) -> dict:
         analyst = analyst_model or self.default_strong_model
 
-        # 1. Carrega a skill e os metadados atuais
+        # 1. Load skill and current metadata
         skill_md = await self.store.get_skill_md(skill_id)
         meta = await self.store.get_skill_meta(skill_id)
 
         if skill_md is None or meta is None:
             raise FileNotFoundError(f"Skill {skill_id} not found")
 
-        # 2. Gera trajetórias se necessário
+        # 2. Generate trajectories if necessary
         if not trajectories and tasks:
             trajectories = await self.evolver.generate_trajectories(
                 analyst, skill_md, tasks
@@ -355,16 +355,16 @@ class OpenSkillClient:
         # 3. Fleet evolution
         result = await self.evolver.evolve(skill_md, trajectories or [])
 
-        # 4. Atualiza metadados (Incrementa contagem de evolução)
+        # 4. Update metadata (Increment evolution count)
         meta.evolution_count += result.patch_count
         meta.last_evolved_at = datetime.now(timezone.utc).isoformat()
         meta.last_success_rate = result.success_rate
 
-        # 5. Persiste skill evoluída (agora passando o meta carregado corretamente)
+        # 5. Persist evolved skill (now passing correctly loaded meta)
         await self.store.save_skill(skill_id, result.evolved_md, meta)
 
-        # 6. Atualiza grafo
-        # Certifique-se de que o método update_skill_node exista no graph.py (conforme ajustamos antes)
+        # 6. Update graph
+        # Ensure update_skill_node method exists in graph.py (as adjusted before)
         await self.graph.update_skill_node(skill_id, meta=meta.to_dict(), store=self.store)
 
         log.info("evolve.done", skill_id=skill_id, patches=result.patch_count)
@@ -376,15 +376,15 @@ class OpenSkillClient:
         *,
         top_k: int = 3,
         use_graph: bool = True,
-    ) -> RetrievalGuidance: # Mude de dict para RetrievalGuidance
+    ) -> RetrievalGuidance: # Change from dict to RetrievalGuidance
         return await self.retriever.retrieve(query, top_k=top_k, use_graph=use_graph)
 
     async def list_skills(self) -> list[SkillMetadata]:
-        """Lista todas as skills."""
+        """List all skills."""
         return await self.store.list_skills()
 
     async def get_skill(self, skill_id: str) -> dict:
-        """Retorna skill completa (metadados + markdown)."""
+        """Returns complete skill (metadata + markdown)."""
         md = await self.store.get_skill_md(skill_id)
         meta = await self.store.get_skill_meta(skill_id)
         if md is None:
@@ -402,14 +402,14 @@ class OpenSkillClient:
 
     async def pull(self, skill_name: str) -> SkillMetadata:
         """
-        Baixa uma skill do OpenSkill Hub (registry público).
+        Download a skill from OpenSkill Hub (public registry).
 
-        Uso:  skill = await client.pull("raft/high-latency-consensus")
+        Usage:  skill = await client.pull("raft/high-latency-consensus")
         """
-        # Delegates para CloudSaaSStore ou baixa do hub público
+        # Delegates to CloudSaaSStore or download from public hub
         raise NotImplementedError("Hub integration coming soon")
 
-    # ── Helpers internos ──────────────────────────────────────────────────────
+    # ── Internal helpers ──────────────────────────────────────────────────────
 
     async def _embed_and_register(self, skill_id: str, skill_md: str, meta: SkillMetadata) -> None:
         try:
@@ -417,7 +417,7 @@ class OpenSkillClient:
             embedding_list = vec.tolist()
             qv = self.quantizer.quantize(vec)
 
-            # Persiste o perfil vetorial via save_embedding (caminho limpo)
+            # Persist vector profile via save_embedding (clean path)
             await self.store.save_embedding(
                 skill_id=skill_id,
                 embedding=embedding_list,
@@ -427,7 +427,7 @@ class OpenSkillClient:
                 provider="OpenAI" if "openai" in self.llm.model_id.lower() else "LocalMiniLM",
             )
 
-            # Registro no grafo
+            # Register in graph
             all_metas = await self.store.list_skills()
             all_metas_dict = {m.id: m.to_dict() for m in all_metas}
             await register_skill_in_graph(

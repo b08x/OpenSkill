@@ -1,22 +1,22 @@
 """
-bootstrap_data.py — Gerador de Dataset Sintético para o Path Scorer
+bootstrap_data.py — Synthetic Dataset Generator for Path Scorer
 ====================================================================
-Gera pares (query, path, label) para treino do PathScorerModel
-sem depender de API externa. Usa sentence-transformers localmente.
+Generates (query, path, label) pairs for training the PathScorerModel
+without depending on external APIs. Uses sentence-transformers locally.
 
-CORREÇÃO: Auto-detecta a dimensão dos embeddings das skills em vez de
-          assumir 384d fixo. Compatível com embeddings 384d (MiniLM local)
-          e 1536d (OpenAI text-embedding-3-small via OpenRouter).
+FIX: Auto-detects skill embedding dimension instead of
+          assuming fixed 384d. Compatible with 384d (local MiniLM)
+          and 1536d (OpenAI text-embedding-3-small via OpenRouter) embeddings.
 
-Estratégia de geração (3 tipos de negativos):
-  1. Random negative   — path de skill completamente diferente
-  2. Hard negative     — path de skill da mesma categoria (confunde mais)
-  3. Reversed negative — mesmo path positivo mas query errada (invariância)
+Generation Strategy (3 types of negatives):
+  1. Random negative   — path of a completely different skill
+  2. Hard negative     — path of a skill in the same category (more confusing)
+  3. Reversed negative — same positive path but wrong query (invariance)
 
-Uso standalone:
+Standalone Use:
     python bootstrap_data.py --skill-dir ./skills_output --output train_data.npz
 
-Ou importado:
+Or Imported:
     from bootstrap_data import generate_bootstrap_dataset
     train_data, val_data = generate_bootstrap_dataset("./skills_output")
 """
@@ -35,7 +35,7 @@ log = structlog.get_logger()
 
 TrainSample = Tuple[np.ndarray, np.ndarray, bool]  # (query_vec, path_vec, is_positive)
 
-# Queries sintéticas por domínio — cobertura ampla sem precisar de LLM
+# Synthetic queries per domain — broad coverage without needing LLM
 DOMAIN_QUERIES: dict[str, list[str]] = {
     "Database": [
         "database connection is timing out and failing",
@@ -147,7 +147,7 @@ DOMAIN_QUERIES: dict[str, list[str]] = {
     ],
 }
 
-# Templates de query que usam o título da skill diretamente
+# Query templates using skill title directly
 TITLE_QUERY_TEMPLATES = [
     "how to {title_lower}",
     "best way to {title_lower}",
@@ -164,9 +164,9 @@ TITLE_QUERY_TEMPLATES = [
 
 def _detect_embed_dim(all_metas) -> int:
     """
-    Auto-detecta a dimensão dos embeddings a partir das skills disponíveis.
-    Prioriza 1536d (OpenAI) sobre 384d (MiniLM local), pois é o que o
-    OpenRouterProvider gera por padrão.
+    Auto-detects embedding dimension from available skills.
+    Prioritizes 1536d (OpenAI) over 384d (local MiniLM), as it's what
+    OpenRouterProvider generates by default.
     """
     dim_counts: dict[int, int] = {}
     for m in all_metas:
@@ -178,16 +178,16 @@ def _detect_embed_dim(all_metas) -> int:
                 p_prov = getattr(p, 'provider', '') or (p.get('provider', '') if isinstance(p, dict) else '')
                 if p_dim > 0 and p_emb is not None and p_prov != "OpenSkillGNN":
                     dim_counts[p_dim] = dim_counts.get(p_dim, 0) + 1
-        # Fallback: campo embedding raiz
+        # Fallback: root embedding field
         root_emb = getattr(m, 'embedding', None)
         if root_emb and isinstance(root_emb, list) and len(root_emb) > 0:
             d = len(root_emb)
             dim_counts[d] = dim_counts.get(d, 0) + 1
 
     if not dim_counts:
-        return 384  # fallback padrão
+        return 384  # default fallback
 
-    # Retorna a dimensão mais comum
+    # Return most common dimension
     detected = max(dim_counts, key=lambda d: dim_counts[d])
     log.info("bootstrap.detected_embed_dim", dim=detected, counts=dim_counts)
     return detected
@@ -195,12 +195,12 @@ def _detect_embed_dim(all_metas) -> int:
 
 async def _embed_queries_async(queries: list[str], target_dim: int, provider: str, api_key: str = None) -> np.ndarray:
     """
-    Vetoriza as queries sintéticas usando o provedor correto para manter o mesmo espaço latente das skills.
+    Vectorizes synthetic queries using the correct provider to maintain the same latent space as skills.
     """
-    # Se for OpenAI (1536d)
+    # If OpenAI (1536d)
     if provider == "openai" or (provider == "auto" and target_dim == 1536):
         if not api_key:
-            raise ValueError("API Key é necessária para vetorizar queries com OpenAI.")
+            raise ValueError("API Key is required to vectorize queries with OpenAI.")
 
         from openskill.llm.openrouter import OpenRouterProvider
         import os
@@ -212,11 +212,11 @@ async def _embed_queries_async(queries: list[str], target_dim: int, provider: st
         for q in queries:
             vec = await llm.embed(q)
             vecs.append(vec)
-            await asyncio.sleep(0.05)  # Pausa leve para evitar Rate Limit na API
+            await asyncio.sleep(0.05)  # Slight pause to avoid Rate Limit on API
 
         return np.array(vecs, dtype=np.float32)
 
-    # Se for Local (384d)
+    # If Local (384d)
     else:
         from sentence_transformers import SentenceTransformer
         model_name = "sentence-transformers/all-MiniLM-L6-v2"
@@ -227,8 +227,8 @@ async def _embed_queries_async(queries: list[str], target_dim: int, provider: st
 
 
 def _queries_for_skill(meta: Any) -> list[str]:
-    """Gera queries para uma skill: combina templates com título + queries de domínio."""
-    # Verificação limpa de tipos para agradar o Type Checker do editor
+    """Generates queries for a skill: combines templates with title + domain queries."""
+    # Type checking for IDE
     if isinstance(meta, dict):
         title = meta.get("title", "") or ""
         category = meta.get("category", "General") or "General"
@@ -240,20 +240,20 @@ def _queries_for_skill(meta: Any) -> list[str]:
 
     queries = []
 
-    # 1. Queries baseadas no título
+    # 1. Title-based queries
     title_lower = title.lower().replace("_", " ").replace("-", " ")
     if title_lower:
         for tpl in TITLE_QUERY_TEMPLATES:
             queries.append(tpl.format(title_lower=title_lower))
 
-    # 2. Queries de domínio pelo category
+    # 2. Domain queries by category
     domain_key = "General"
     for k in DOMAIN_QUERIES:
         if k.lower() in category.lower():
             domain_key = k
             break
 
-    # Tenta também pelo título (ex: "Fibonacci" → "Mathematics")
+    # Also try by title (e.g., "Fibonacci" → "Mathematics")
     if domain_key == "General":
         title_lower_check = title.lower()
         if any(w in title_lower_check for w in ["fibonacci", "sequence", "math", "calcul"]):
@@ -263,12 +263,12 @@ def _queries_for_skill(meta: Any) -> list[str]:
 
     queries.extend(DOMAIN_QUERIES[domain_key])
 
-    # 3. Fragmentos do task field (se disponível)
+    # 3. Fragments from task field (if available)
     if task:
         sentences = [s.strip() for s in task.replace("\n", ".").split(".") if len(s.strip()) > 20]
         queries.extend(sentences[:5])
 
-    # Remove duplicatas mantendo ordem
+    # Remove duplicates preserving order
     seen = set()
     unique = []
     for q in queries:
@@ -281,10 +281,10 @@ def _queries_for_skill(meta: Any) -> list[str]:
 
 def _get_skill_vec(meta: Any, dim: int) -> Optional[np.ndarray]:
     """
-    Extrai embedding da dimensão correta de uma SkillMetadata ou dict.
-    Ignora vetores GNN (provider=OpenSkillGNN).
+    Extracts embedding of correct dimension from a SkillMetadata or dict.
+    Ignores GNN vectors (provider=OpenSkillGNN).
     """
-    # Extração segura com if/else explícito para agradar o Linter
+    # Safe extraction with explicit if/else
     if isinstance(meta, dict):
         vectors = meta.get('vectors', {}) or {}
         root_emb = meta.get('embedding', None)
@@ -306,7 +306,7 @@ def _get_skill_vec(meta: Any, dim: int) -> Optional[np.ndarray]:
             if p_dim == dim and p_emb is not None and p_prov != "OpenSkillGNN":
                 return np.array(p_emb, dtype=np.float32)
 
-    # Fallback: campo embedding raiz
+    # Fallback: root embedding field
     if root_emb and isinstance(root_emb, list) and len(root_emb) == dim:
         return np.array(root_emb, dtype=np.float32)
 
@@ -319,39 +319,39 @@ async def generate_bootstrap_dataset(
     val_split: float = 0.15,
     hard_neg_ratio: float = 0.4,
     seed: int = 42,
-    api_key: Optional[str] = None, # NOVO PARÂMETRO
-    provider: str = "auto"         # NOVO PARÂMETRO
+    api_key: Optional[str] = None, # NEW PARAMETER
+    provider: str = "auto"         # NEW PARAMETER
 ) -> Tuple[List[TrainSample], List[TrainSample]]:
     """
-    Gera dataset completo de treino e validação.
-    Se embed_dim=0 (padrão), detecta automaticamente a dimensão das skills.
+    Generates complete training and validation dataset.
+    If embed_dim=0 (default), automatically detects skill dimension.
 
     Returns:
-        (train_data, val_data) — listas de (query_vec, path_vec, is_positive)
+        (train_data, val_data) — lists of (query_vec, path_vec, is_positive)
     """
     random.seed(seed)
     np.random.seed(seed)
 
-    # 1. Carrega skills
+    # 1. Load skills
     from openskill.storage.local import LocalDiskStore
     store = LocalDiskStore(skill_dir)
     all_metas = await store.list_skills()
 
     if len(all_metas) < 2:
         raise ValueError(
-            f"Encontradas apenas {len(all_metas)} skills em '{skill_dir}'.\n"
-            "O treino contrastivo precisa de ao menos 2 skills.\n"
-            "Crie mais skills com: openskill create"
+            f"Found only {len(all_metas)} skills in '{skill_dir}'.\n"
+            "Contrastive training needs at least 2 skills.\n"
+            "Create more skills with: openskill create"
         )
 
     log.info("bootstrap.skills_loaded", n=len(all_metas))
 
-    # 2. Auto-detecta dimensão se não especificada
+    # 2. Auto-detect dimension if not specified
     if embed_dim == 0:
         embed_dim = _detect_embed_dim(all_metas)
         log.info("bootstrap.auto_dim", embed_dim=embed_dim)
 
-    # 3. Filtra skills que têm vetor da dimensão correta
+    # 3. Filter skills with correct dimension vector
     valid_metas: list[Tuple[Any, np.ndarray]] = []
     for m in all_metas:
         vec = _get_skill_vec(m, embed_dim)
@@ -362,7 +362,7 @@ async def generate_bootstrap_dataset(
             log.warning("bootstrap.skill_no_vector", title=title, expected_dim=embed_dim)
 
     if len(valid_metas) < 2:
-        # Diagnóstico detalhado
+        # Detailed diagnostic
         dims_found = set()
         for m in all_metas:
             vectors = getattr(m, 'vectors', {}) or {}
@@ -371,27 +371,27 @@ async def generate_bootstrap_dataset(
                 if d > 0:
                     dims_found.add(d)
         raise ValueError(
-            f"Nenhuma skill tem vetor {embed_dim}d.\n"
-            f"Dimensões encontradas nas skills: {dims_found or 'nenhuma'}\n\n"
-            "Soluções:\n"
-            f"  1. Se suas skills têm dim {list(dims_found)[0] if dims_found else '?'}d, "
-            f"passe --embed-dim {list(dims_found)[0] if dims_found else '1536'}\n"
-            "  2. Se não há embeddings, execute: openskill embed <skill-id> --api-key <key>\n"
-            "  3. Use o modo local: openskill embed <skill-id> --local"
+            f"No skills have {embed_dim}d vector.\n"
+            f"Dimensions found in skills: {dims_found or 'none'}\n\n"
+            "Solutions:\n"
+            f"  1. If your skills have {list(dims_found)[0] if dims_found else '?'}d dim, "
+            f"pass --embed-dim {list(dims_found)[0] if dims_found else '1536'}\n"
+            "  2. If there are no embeddings, run: openskill embed <skill-id> --api-key <key>\n"
+            "  3. Use local mode: openskill embed <skill-id> --local"
         )
 
     log.info("bootstrap.valid_skills", n=len(valid_metas), embed_dim=embed_dim)
 
-    # 4. Carrega embedder (com auto-ajuste de dimensão)
+    # 4. Load embedder (with dimension auto-adjustment)
 
 
-    # 5. Constrói índice categoria → skills (para hard negatives)
+    # 5. Build category index → skills (for hard negatives)
     cat_index: dict[str, list[int]] = {}
     for i, (meta, _) in enumerate(valid_metas):
         cat = (getattr(meta, "category", "") or "General").split("/")[0]
         cat_index.setdefault(cat, []).append(i)
 
-    # 6. Gera samples
+    # 6. Generate samples
 
     all_samples: List[TrainSample] = []
 
@@ -399,14 +399,14 @@ async def generate_bootstrap_dataset(
         queries = _queries_for_skill(meta)
         log.info("bootstrap.generating", skill=getattr(meta, "title", "?"), n_queries=len(queries))
 
-        # AQUI ESTÁ A MÁGICA
+        # HERE IS THE MAGIC
         q_vecs = await _embed_queries_async(queries, embed_dim, provider, api_key)
 
         for q_vec in q_vecs:
-            # Positivo
+            # Positive
             all_samples.append((q_vec, skill_vec, True))
 
-            # Negativos
+            # Negatives
             other_indices = [i for i in range(len(valid_metas)) if i != skill_idx]
             if not other_indices:
                 continue
@@ -425,7 +425,7 @@ async def generate_bootstrap_dataset(
             for neg_i in hard_neg_idx + rand_neg_idx:
                 all_samples.append((q_vec, valid_metas[neg_i][1], False))
 
-            # Reversed negative (CORRIGIDO)
+            # Reversed negative (FIXED)
             wrong_query_skill_i = random.choice(other_indices)
             wrong_queries = _queries_for_skill(valid_metas[wrong_query_skill_i][0])
             if wrong_queries:
@@ -435,7 +435,7 @@ async def generate_bootstrap_dataset(
 
     log.info("bootstrap.total_samples", n=len(all_samples), embed_dim=embed_dim)
 
-    # 7. Shuffle e split train/val
+    # 7. Shuffle and split train/val
     random.shuffle(all_samples)
     n_val = max(1, int(len(all_samples) * val_split))
     val_data = all_samples[:n_val]
@@ -449,7 +449,7 @@ async def generate_bootstrap_dataset(
         val=len(val_data),
         pos=pos_train,
         neg=neg_train,
-        balance=f"{pos_train/max(len(train_data),1)*100:.1f}% positivos",
+        balance=f"{pos_train/max(len(train_data),1)*100:.1f}% positive",
     )
 
     return train_data, val_data
@@ -460,7 +460,7 @@ def save_dataset(
     val_data: List[TrainSample],
     path: str = "train_data.npz",
 ):
-    """Salva dataset em .npz para reuso sem re-gerar."""
+    """Saves dataset to .npz for reuse without re-generating."""
     def _pack(data):
         q = np.array([d[0] for d in data], dtype=np.float32)
         p = np.array([d[1] for d in data], dtype=np.float32)
@@ -474,7 +474,7 @@ def save_dataset(
 
 
 def load_dataset(path: str) -> Tuple[List[TrainSample], List[TrainSample]]:
-    """Carrega dataset salvo em .npz."""
+    """Loads dataset saved in .npz."""
     d = np.load(path)
     train = list(zip(d["tq"], d["tp"], d["ty"].astype(bool)))
     val   = list(zip(d["vq"], d["vp"], d["vy"].astype(bool)))
@@ -482,16 +482,16 @@ def load_dataset(path: str) -> Tuple[List[TrainSample], List[TrainSample]]:
     return train, val
 
 
-# ── CLI standalone ────────────────────────────────────────────────────────────
+# ── Standalone CLI ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Gera dataset de bootstrap para o Path Scorer")
-    parser.add_argument("--skill-dir", default="./skills_output", help="Pasta com as skills")
-    parser.add_argument("--output", default="train_data.npz", help="Arquivo de saída .npz")
+    parser = argparse.ArgumentParser(description="Generates bootstrap dataset for Path Scorer")
+    parser.add_argument("--skill-dir", default="./skills_output", help="Skills folder")
+    parser.add_argument("--output", default="train_data.npz", help="Output .npz file")
     parser.add_argument("--embed-dim", type=int, default=0,
-                        help="Dimensão dos embeddings (0=auto-detectar, default: 0)")
+                        help="Embedding dimension (0=auto-detect, default: 0)")
     parser.add_argument("--val-split", type=float, default=0.15)
     parser.add_argument("--hard-neg-ratio", type=float, default=0.4)
     parser.add_argument("--seed", type=int, default=42)
@@ -507,8 +507,8 @@ if __name__ == "__main__":
         )
         save_dataset(train, val, args.output)
         dim = train[0][0].shape[0] if train else "?"
-        print(f"\nDataset gerado: {len(train)} treino + {len(val)} validação")
-        print(f"Dimensão dos vetores: {dim}d")
-        print(f"Salvo em: {args.output}")
+        print(f"\nDataset generated: {len(train)} train + {len(val)} validation")
+        print(f"Vector dimension: {dim}d")
+        print(f"Saved to: {args.output}")
 
     asyncio.run(_main())

@@ -1,8 +1,8 @@
 """
-OllamaProvider — LLM 100% Local e Gratuito
+OllamaProvider — 100% Local and Free LLM
 ============================================
-Conecta no Ollama que roda localmente na máquina do desenvolvedor.
-Zero custo de API, zero dados mandando para fora.
+Connects to Ollama running locally on the developer's machine.
+Zero API cost, zero data sent out.
 """
 
 from __future__ import annotations
@@ -20,9 +20,9 @@ from openskill.llm.base import (
 
 class OllamaProvider(BaseLLMProvider):
     """
-    Provider que conecta no Ollama local (http://localhost:11434).
+    Provider that connects to local Ollama (http://localhost:11434).
 
-    Instalação do Ollama:
+    Ollama installation:
         curl -fsSL https://ollama.com/install.sh | sh
         ollama pull qwen2.5-coder:7b
     """
@@ -66,7 +66,7 @@ class OllamaProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> LLMResponse:
-        # Converte para formato Ollama
+        # Converts to Ollama format
         ollama_messages = [
             {"role": m.role, "content": m.content} for m in messages
         ]
@@ -110,16 +110,16 @@ class OllamaProvider(BaseLLMProvider):
         temperature: float = 0.7,
     ) -> LLMResponse:
         """
-        Gera usando Soft Latent Injection (S-Path-RAG).
+        Generates using Soft Latent Injection (S-Path-RAG).
 
-        Os vetores das skills são injetados como soft prompts
-        DIRETAMENTE no tensor de embeddings antes da geração.
+        Skill vectors are injected as soft prompts
+        DIRECTLY into the embedding tensor before generation.
 
-        Funciona com modelos HuggingFace via transformers.
-        Para Ollama puro, hacemos fallback a texto.
+        Works with HuggingFace models via transformers.
+        For pure Ollama, we fallback to text.
         """
-        # Ollama não suporta injeção de embeddings diretamente,
-        # então concatenamos os vetores como contexto especial
+        # Ollama does not support direct embedding injection,
+        # so we concatenate vectors as special context
         import base64
         import json
 

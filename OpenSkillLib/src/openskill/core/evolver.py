@@ -1,17 +1,17 @@
 """
 SkillEvolver — Trace2Skill: Fleet-Based Parallel Evolution
 ==========================================================
-Implementação completa do pipeline Trace2Skill (arXiv:2603.25158).
+Full implementation of the Trace2Skill pipeline (arXiv:2603.25158).
 
-Diferente do RAG tradicional, o Evolver não apenas recupera, ele REESCREVE
-as diretrizes de raciocínio baseado em evidência empírica de falhas e sucessos.
+Unlike traditional RAG, the Evolver doesn't just retrieve; it REWRITES
+reasoning guidelines based on empirical evidence of failures and successes.
 
-Mecânica:
-  1. Batching: Divide N trajetórias entre uma frota de sub-agentes.
-  2. Patch Proposal: Cada sub-agent propõe um 'Skill Patch' (JSON Diff).
-  3. Hierarchical Merge: Um operador de merge consolida os patches, mantendo
-     apenas o que for prevalente (sinal > ruído).
-  4. Application: Aplica as mudanças estruturadas no Markdown original.
+Mechanics:
+  1. Batching: Splits N trajectories among a fleet of sub-agents.
+  2. Patch Proposal: Each sub-agent proposes a 'Skill Patch' (JSON Diff).
+  3. Hierarchical Merge: A merge operator consolidates patches, keeping
+     only those that are prevalent (signal > noise).
+  4. Application: Applies structured changes to the original Markdown.
 """
 
 from __future__ import annotations
@@ -28,29 +28,29 @@ from openskill.llm.base import BaseLLMProvider, LLMMessage
 
 log = structlog.get_logger()
 
-# ── Configurações do Trace2Skill ─────────────────────────────────────────────
+# ── Trace2Skill Settings ─────────────────────────────────────────────
 
-FLEET_BATCH_SIZE = 4  # Trajetórias por sub-agente
-MAX_FLEET_SIZE = 10  # Limite de paralelismo para evitar rate limit
-MIN_PREVALENCE = 0.3  # Só aceita patches vistos em >30% das trajetórias do batch
+FLEET_BATCH_SIZE = 4  # Trajectories per sub-agent
+MAX_FLEET_SIZE = 10  # Parallelism limit to avoid rate limiting
+MIN_PREVALENCE = 0.3  # Only accepts patches seen in >30% of the batch trajectories
 
 
 # ── Data Classes ─────────────────────────────────────────────────────────────
 
 @dataclass
 class SkillPatch:
-    """Representa uma mudança sugerida em uma seção da Skill."""
+    """Represents a suggested change in a Skill section."""
     section: str  # 'Invariants', 'Violations', 'Constraints', etc.
     op: str  # 'append', 'replace', 'insert', 'remove'
-    content: str  # O novo texto
-    target: str = ""  # Texto âncora para replace/insert
-    justification: str = ""  # Por que essa mudança é necessária?
-    prevalence: float = 0.5  # Quão comum foi o padrão observado (0.0 a 1.0)
+    content: str  # The new text
+    target: str = ""  # Anchor text for replace/insert
+    justification: str = ""  # Why is this change necessary?
+    prevalence: float = 0.5  # How common was the observed pattern (0.0 to 1.0)
 
 
 @dataclass
 class EvolutionResult:
-    """Resultado final do processo de evolução."""
+    """Final result of the evolution process."""
     evolved_md: str
     patches_applied: list[SkillPatch]
     success_rate: float
@@ -82,7 +82,7 @@ MERGE_SYSTEM_PROMPT = (
 )
 
 
-# ── Classe Principal ─────────────────────────────────────────────────────────
+# ── Main Class ─────────────────────────────────────────────────────────
 
 class SkillEvolver:
     def __init__(self, llm: BaseLLMProvider):
@@ -94,9 +94,9 @@ class SkillEvolver:
             trajectories: list[dict]
     ) -> EvolutionResult:
         """
-        Executa o pipeline completo de evolução em frota.
+        Executes the complete fleet evolution pipeline.
 
-        trajectories: list de {"task": str, "trajectory": str, "success": bool}
+        trajectories: list of {"task": str, "trajectory": str, "success": bool}
         """
         if not trajectories:
             log.warning("evolver.no_trajectories")
@@ -104,19 +104,19 @@ class SkillEvolver:
 
         success_rate = sum(1 for t in trajectories if t.get("success")) / len(trajectories)
 
-        # 1. Stage 2: Proposta de Patches em Paralelo
+        # 1. Stage 2: Parallel Patch Proposal
         batches = self._create_batches(trajectories)
         log.info("evolver.dispatch_fleet", num_batches=len(batches))
 
         patch_groups = await asyncio.gather(*[
             self._analyze_batch(skill_md, batch) for batch in batches
         ])
-        patch_groups = [g for g in patch_groups if g]  # Remove falhas
+        patch_groups = [g for g in patch_groups if g]  # Remove failures
 
-        # 2. Stage 3: Consolidação Hierárquica (Merge)
+        # 2. Stage 3: Hierarchical Consolidation (Merge)
         consolidated_patches = await self._hierarchical_merge(skill_md, patch_groups)
 
-        # 3. Stage 4: Aplicação dos Patches
+        # 3. Stage 4: Patch Application
         evolved_md = self._apply_patches(skill_md, consolidated_patches)
 
         return EvolutionResult(
@@ -133,26 +133,26 @@ class SkillEvolver:
             skill_md: str,
             tasks: list[str]
     ) -> list[dict]:
-        """Usa o LLM para rodar a skill contra tarefas e gerar trajetórias de teste."""
+        """Uses the LLM to run the skill against tasks and generate test trajectories."""
 
         async def _run_task(task: str):
             prompt = f"Using the following SKILL GUIDE, solve the task.\n\nSKILL:\n{skill_md}\n\nTASK:\n{task}"
-            # Nota: O agente deve reportar se teve sucesso no final
+            # Note: The agent must report if it was successful at the end
             res = await self.llm.generate([LLMMessage(role="user", content=prompt)])
             success = "RESULT: SUCCESS" in res.content.upper()
             return {"task": task, "trajectory": res.content, "success": success}
 
         return await asyncio.gather(*[_run_task(t) for t in tasks[:MAX_FLEET_SIZE]])
 
-    # ── Helpers Privados ──────────────────────────────────────────────────────
+    # ── Private Helpers ──────────────────────────────────────────────────────
 
     def _create_batches(self, trajectories: list[dict]) -> list[list[dict]]:
-        """Divide as trajetórias em lotes para a frota."""
+        """Splits trajectories into batches for the fleet."""
         size = FLEET_BATCH_SIZE
         return [trajectories[i:i + size] for i in range(0, len(trajectories), size)][:MAX_FLEET_SIZE]
 
     async def _analyze_batch(self, skill_md: str, batch: list[dict]) -> list[SkillPatch]:
-        """Sub-agente analisa um lote específico."""
+        """Sub-agent analyzes a specific batch."""
         traj_str = ""
         for i, t in enumerate(batch):
             status = "SUCCESS" if t['success'] else "FAILURE"
@@ -175,12 +175,12 @@ class SkillEvolver:
             return []
 
     async def _hierarchical_merge(self, skill_md: str, groups: list[list[SkillPatch]]) -> list[SkillPatch]:
-        """Consolida os patches de todos os sub-agentes (Recursivo)."""
+        """Consolidates patches from all sub-agents (Recursive)."""
         if not groups: return []
         if len(groups) == 1: return groups[0]
 
-        # Para simplificar, fazemos um merge global. 
-        # Em larga escala (>100 patches), faríamos merge em pares (árvore).
+        # To simplify, we perform a global merge. 
+        # On a large scale (>100 patches), we would merge in pairs (tree).
         all_patches_json = json.dumps([p.__dict__ for group in groups for p in group], indent=2)
 
         user_msg = f"SKILL CONTEXT:\n{skill_md[:500]}...\n\nPATCHES TO MERGE:\n{all_patches_json}"
@@ -192,31 +192,31 @@ class SkillEvolver:
 
         data = self._extract_json(raw.content)
         if isinstance(data, list):
-            # Filtra por prevalência mínima para garantir qualidade
+            # Filter by minimum prevalence to ensure quality
             return [SkillPatch(**p) for p in data if p.get('prevalence', 0) >= MIN_PREVALENCE]
-        return groups[0]  # Fallback para o primeiro grupo se falhar
+        return groups[0]  # Fallback to the first group if it fails
 
     def _apply_patches(self, skill_md: str, patches: list[SkillPatch]) -> str:
-        """Aplica as mudanças no Markdown (Baseado em Regex/Heurística)."""
+        """Applies changes to the Markdown (Based on Regex/Heuristic)."""
         lines = skill_md.split("\n")
 
         for patch in patches:
-            # Tenta achar a seção (ex: ## Normative Constraints)
+            # Attempts to find the section (e.g., ## Normative Constraints)
             section_header = f"## {patch.section}"
 
-            # 1. Append (mais simples e seguro)
+            # 1. Append (simplest and safest)
             if patch.op == "append":
                 found = False
                 for i, line in enumerate(lines):
                     if section_header.lower() in line.lower():
-                        # Insere após o cabeçalho ou no fim da seção
+                        # Inserts after the header or at the end of the section
                         lines.insert(i + 1, f"- {patch.content}")
                         found = True
                         break
                 if not found:
                     lines.append(f"\n{section_header}\n- {patch.content}")
 
-            # 2. Replace/Remove (requer target)
+            # 2. Replace/Remove (requires target)
             elif patch.op in ["replace", "remove"] and patch.target:
                 for i, line in enumerate(lines):
                     if patch.target.lower() in line.lower():
@@ -226,14 +226,14 @@ class SkillEvolver:
                             lines.pop(i)
                         break
 
-        # Adiciona log de evolução no final do documento
+        # Adds evolution log to the end of the document
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
         lines.append(f"\n---\n*Evolved on {now} via Trace2Skill ({len(patches)} prevalent patterns identified).*")
 
         return "\n".join(lines)
 
     def _extract_json(self, text: str) -> Any:
-        """Helper robusto para extrair JSON."""
+        """Robust helper for extracting JSON."""
         try:
             m = re.search(r'\[.*\]', text, re.DOTALL)
             if m: return json.loads(m.group(0))
@@ -242,5 +242,5 @@ class SkillEvolver:
             return None
 
     def _is_valid_patch(self, p: dict) -> bool:
-        """Valida se o dicionário tem os campos mínimos de um SkillPatch."""
+        """Validates if the dictionary has the minimum fields of a SkillPatch."""
         return all(k in p for k in ["section", "op", "content"])

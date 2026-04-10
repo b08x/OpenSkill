@@ -1,30 +1,30 @@
 """
-projector_trainer.py — Treino do SkillProjector com L_align (Gap 2)
+projector_trainer.py — SkillProjector training with L_align (Gap 2)
 ====================================================================
-Treina o SkillProjector para que o LLM realmente atenda aos vetores injetados.
+Trains the SkillProjector so the LLM truly attends to the injected vectors.
 
 Eq 7: attnMass(p) = (1/T_tok) * Σ_t Σ_{k ∈ idx(p)} A_{t,k}
 Eq 8: L_align = (1/|P_sel|) * Σ_p (alpha_p - attnMass_p)²
 
 Pipeline:
-  1. Carrega o scorer já treinado (path_scorer.safetensors)
-  2. Carrega o LLM (Qwen) — congelado, sem gradiente
-  3. Carrega as skills + embeddings do store
-  4. Para cada query do dataset:
-     a. Scorer calcula alpha_p por skill (Eq 5)
-     b. Projector injeta as skills como prefix tokens
-     c. Forward pass com output_attentions=True
+  1. Loads already trained scorer (path_scorer.safetensors)
+  2. Loads LLM (Qwen) — frozen, no gradients
+  3. Loads skills + embeddings from store
+  4. For each query in the dataset:
+     a. Scorer calculates alpha_p per skill (Eq 5)
+     b. Projector injects skills as prefix tokens
+     c. Forward pass with output_attentions=True
      d. L_align = (alpha_p - attnMass_p)²
-     e. Backward apenas no projector (LLM congelado)
-  5. Salva projector_weights.safetensors
+     e. Backward only on the projector (frozen LLM)
+  5. Saves projector_weights.safetensors
 
-Uso:
+Usage:
     python projector_trainer.py --skill-dir ./skills_output --model-id Qwen/Qwen2.5-0.5B
 
-    # Usar dataset existente
+    # Use existing dataset
     python projector_trainer.py --skill-dir ./skills_output --data-cache train_data.npz
 
-    # Ajustar epochs e LR
+    # Adjust epochs and LR
     python projector_trainer.py --skill-dir ./skills_output --epochs 30 --lr 5e-4
 """
 
@@ -48,21 +48,21 @@ TrainSample = Tuple[np.ndarray, np.ndarray, bool]
 PROJECTOR_SAVE_NAME  = "projector_weights.safetensors"
 SCORER_SAVE_NAME     = "path_scorer.safetensors"
 DEFAULT_MODEL_ID     = "Qwen/Qwen3.5-2B"
-BATCH_SIZE           = 4    # pequeno — cada sample exige um forward pass do LLM
-LAMBDA_ALIGN         = 0.5  # peso do L_align na loss total
+BATCH_SIZE           = 4    # small — each sample requires an LLM forward pass
+LAMBDA_ALIGN         = 0.5  # L_align weight in total loss
 
 
-# ── Carregamento do LLM congelado ─────────────────────────────────────────────
+# ── Loading Frozen LLM ─────────────────────────────────────────────
 
 def load_frozen_llm(model_id: str, device: str):
     from transformers import AutoModelForCausalLM, AutoTokenizer
     import torch
 
-    print(f"  Carregando LLM ({model_id}) — congelado...")
+    print(f"  Loading LLM ({model_id}) — frozen...")
 
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 
-    # Deixe o transformers escolher o dtype ideal (geralmente BF16 para Qwen)
+    # Let transformers choose ideal dtype (usually BF16 for Qwen)
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         torch_dtype="auto",
@@ -78,7 +78,7 @@ def load_frozen_llm(model_id: str, device: str):
     return model, tokenizer
 
 
-# ── Coleta de alpha_p via scorer ──────────────────────────────────────────────
+# ── Collecting alpha_p via scorer ──────────────────────────────────────────────
 
 def compute_alphas_for_sample(
     scorer,
@@ -87,8 +87,8 @@ def compute_alphas_for_sample(
     device: str,
 ) -> list[float]:
     """
-    Roda o scorer para cada skill e retorna alpha_p = softmax(u_p) * v_eta_p,
-    normalizado (Eq 4 × Eq 5).
+    Runs the scorer for each skill and returns alpha_p = softmax(u_p) * v_eta_p,
+    normalized (Eq 4 × Eq 5).
     """
     if not skill_vecs:
         return []
@@ -108,12 +108,12 @@ def compute_alphas_for_sample(
     v_t     = torch.stack(vetas)                 # [N]
     w_tilde = torch.softmax(u_t, dim=0)          # [N]
     alpha   = w_tilde * v_t                      # [N]
-    alpha   = alpha / (alpha.sum() + 1e-8)       # normaliza
+    alpha   = alpha / (alpha.sum() + 1e-8)       # normalize
 
     return alpha.tolist()
 
 
-# ── Forward pass para L_align ─────────────────────────────────────────────────
+# ── Forward pass for L_align ─────────────────────────────────────────────────
 
 def compute_lalign_for_batch(
     model,
@@ -126,16 +126,16 @@ def compute_lalign_for_batch(
     device: str,
 ) -> torch.Tensor:
     """
-    Calcula L_align para um batch de queries.
+    Calculates L_align for a batch of queries.
 
-    Para cada query:
-      1. Tokeniza o prompt
-      2. Projeta as skills → prefix tokens (com gradiente no projector)
-      3. Forward pass com output_attentions=True
-      4. Extrai attnMass para cada skill
+    For each query:
+      1. Tokenizes the prompt
+      2. Projects skills → prefix tokens (with gradient on projector)
+      3. Forward pass with output_attentions=True
+      4. Extracts attnMass for each skill
       5. L_align = mean((alpha_p - attnMass_p)²)
 
-    Retorna a média de L_align sobre o batch.
+    Returns the mean L_align over the batch.
     """
     from openskill.injection.soft import capture_attn_mass, create_injected_attention_mask
 
@@ -147,27 +147,25 @@ def compute_lalign_for_batch(
 
         N = len(skill_vecs)
 
-        # Tokeniza o prompt (sem input_ids no generate — usamos embeds)
+        # Tokenize prompt (no input_ids in generate — we use embeds)
         prompt = f"<|im_start|>user\n{query}<|im_end|>\n<|im_start|>assistant\n"
         enc = tokenizer(prompt, return_tensors="pt").to(device)
 
         with torch.no_grad():
-            # Embedding dos tokens do prompt [1, T, D_llm]
+            # Embedding of prompt tokens [1, T, D_llm]
             token_embeds = model.get_input_embeddings()(enc.input_ids)
 
-        # Projeta skills → [N, D_skill] → [N, D_llm]  (COM gradiente)
+        # Projects skills → [N, D_skill] → [N, D_llm]  (WITH gradient)
         skills_t = torch.tensor(
             np.array(skill_vecs),
-            dtype=torch.float32,  # Mantemos a entrada em float32 para o projector
+            dtype=torch.float32,  # Keep input in float32 for projector
             device=device,
         )
-        projected = projector(skills_t)  # Aqui o output é Float32
+        projected = projector(skills_t)  # Output is Float32 here
 
-        # --- ADICIONE ESTA LINHA ABAIXO ---
         projected = projected.to(model.dtype)
-        # ---------------------------------
 
-        # Escala de energia
+        # Energy scaling
         with torch.no_grad():
             token_embeds = model.get_input_embeddings()(enc.input_ids)
             prompt_norm = token_embeds.norm(p=2, dim=-1).mean()
@@ -175,17 +173,17 @@ def compute_lalign_for_batch(
         proj_norm = projected.norm(p=2, dim=-1).mean()
         projected_scaled = projected * (prompt_norm / (proj_norm + 1e-8))
 
-        # Agora o concat funcionará pois ambos são model.dtype (BFloat16)
+        # concat will work now because both are model.dtype (BFloat16)
         combined = torch.cat(
             [projected_scaled.unsqueeze(0), token_embeds], dim=1
         )
 
-        # Máscara de atenção expandida [1, N + T]
+        # Expanded attention mask [1, N + T]
         combined_mask = create_injected_attention_mask(
             enc.attention_mask, N, device
         )
 
-        # Captura attnMass — l_align tem gradiente via combined (que depende do projector)
+        # Capture attnMass — l_align has gradient via combined (depends on projector)
         l_align, attn_mass = capture_attn_mass(
             model=model,
             input_embeds=combined,
@@ -212,7 +210,7 @@ def compute_lalign_for_batch(
     return torch.stack(batch_align_losses).mean()
 
 
-# ── Loop de treino do projector ───────────────────────────────────────────────
+# ── Projector Training Loop ───────────────────────────────────────────────
 
 async def train_projector(
     skill_dir: str,
@@ -225,11 +223,11 @@ async def train_projector(
     device = "cuda" if torch.cuda.is_available() else "cpu"
     skill_path = Path(skill_dir)
 
-    # ── 1. Verifica scorer ────────────────────────────────────────────────────
+    # ── 1. Check Scorer ────────────────────────────────────────────────────
     scorer_path = skill_path / SCORER_SAVE_NAME
     if not scorer_path.exists():
-        print(f"\nERRO: {scorer_path} não encontrado.")
-        print("Execute primeiro: python train_scorer.py --skill-dir", skill_dir)
+        print(f"\nERROR: {scorer_path} not found.")
+        print("Run first: python train_scorer.py --skill-dir", skill_dir)
         sys.exit(1)
 
     from safetensors.torch import load_file as st_load
@@ -239,51 +237,51 @@ async def train_projector(
     scorer = PathScorerModel(embed_dim=384).to(device)
     scorer.load_state_dict(st_load(str(scorer_path)))
     scorer.eval()
-    print(f"  Scorer carregado: {scorer_path}")
+    print(f"  Scorer loaded: {scorer_path}")
 
-    # ── 2. Carrega LLM congelado ──────────────────────────────────────────────
+    # ── 2. Load Frozen LLM ──────────────────────────────────────────────
     model, tokenizer = load_frozen_llm(model_id, device)
     hidden_size = model.config.hidden_size
 
-    # ── 3. Inicializa projector ───────────────────────────────────────────────
+    # ── 3. Initialize Projector ───────────────────────────────────────────────
     projector_path = skill_path / PROJECTOR_SAVE_NAME
     if projector_path.exists():
         projector = SkillProjector.load(
             projector_path, embed_dim=384, llm_hidden_size=hidden_size, device=device
         )
         projector = projector.to(torch.float32)
-        print(f"  Projector existente carregado: {projector_path}")
+        print(f"  Existing projector loaded: {projector_path}")
     else:
         projector = SkillProjector(embed_dim=384, llm_hidden_size=hidden_size)
-        # Inicializa com pequena perturbação em torno de zero
-        # (NÃO eye_ — eye_ só funciona para matrizes quadradas e é sub-ótimo aqui)
+        # Initialize with small perturbation around zero
+        # (NOT eye_ — eye_ only works for square matrices and is suboptimal here)
         torch.nn.init.xavier_uniform_(projector.proj.weight)
         torch.nn.init.zeros_(projector.proj.bias)
         projector = projector.to(device).to(torch.float32)
-        print(f"  Projector novo inicializado (Xavier): {hidden_size}d")
+        print(f"  New projector initialized (Xavier): {hidden_size}d")
 
     projector.train()
 
-    # ── 4. Carrega dataset ────────────────────────────────────────────────────
+    # ── 4. Load Dataset ────────────────────────────────────────────────────
     cache = Path(data_cache)
     if cache.exists():
         from bootstrap_data import load_dataset
         train_data, val_data = load_dataset(str(cache))
     else:
-        print(f"\n  Dataset não encontrado em {cache}.")
-        print("  Execute primeiro: python train_scorer.py --skill-dir", skill_dir, "--only-data")
+        print(f"\n  Dataset not found in {cache}.")
+        print("  Run first: python train_scorer.py --skill-dir", skill_dir, "--only-data")
         sys.exit(1)
 
-    # Filtra apenas os positivos — só queries que têm resposta certa
-    # são úteis para L_align (queremos que o LLM atenda à skill correta)
+    # Filter only positives — only queries with correct answers
+    # are useful for L_align (we want LLM to attend to the correct skill)
     positive_samples = [(q, p) for q, p, is_pos in train_data if is_pos]
-    print(f"\n  {len(positive_samples)} amostras positivas para treino do projector")
+    print(f"\n  {len(positive_samples)} positive samples for projector training")
 
     if len(positive_samples) == 0:
-        print("ERRO: Nenhuma amostra positiva no dataset.")
+        print("ERROR: No positive samples in the dataset.")
         sys.exit(1)
 
-    # Carrega as skills do store — guarda (title, vec) para queries representativas
+    # Load skills from store — keep (title, vec) for representative queries
     from openskill.storage.local import LocalDiskStore
     store = LocalDiskStore(skill_dir)
     all_metas = await store.list_skills()
@@ -298,18 +296,18 @@ async def train_projector(
                 break
 
     if not skill_index:
-        print("ERRO: Nenhum skill com embedding 384d encontrado.")
-        print("Execute: openskill embed --local --skill-id <id>")
+        print("ERROR: No skills with 384d embedding found.")
+        print("Run: openskill embed --local --skill-id <id>")
         sys.exit(1)
 
     skill_vecs_store = [v for _, v in skill_index]
     skill_titles     = [t for t, _ in skill_index]
-    print(f"  {len(skill_vecs_store)} skills com vetores 384d disponíveis")
+    print(f"  {len(skill_vecs_store)} skills with 384d vectors available")
 
     # ── 5. Optimizer ─────────────────────────────────────────────────────────
     optimizer = torch.optim.AdamW(projector.parameters(), lr=lr, weight_decay=1e-4)
 
-    # LR scheduler: cosine com warmup
+    # LR scheduler: cosine with warmup
     import math
     steps_per_epoch = math.ceil(len(positive_samples) / BATCH_SIZE)
     total_steps = epochs * steps_per_epoch
@@ -321,10 +319,10 @@ async def train_projector(
         pct_start=warmup_steps / total_steps,
     )
 
-    # ── 6. Loop de treino ─────────────────────────────────────────────────────
-    print(f"\n  Treinando projector por {epochs} epochs...")
+    # ── 6. Training Loop ─────────────────────────────────────────────────────
+    print(f"\n  Training projector for {epochs} epochs...")
     print(f"  LR: {lr}  |  Lambda_align: {lambda_align}  |  Batch: {BATCH_SIZE}")
-    print(f"  Layers de atenção usadas: últimos {int(model.config.num_hidden_layers * 0.5)}")
+    print(f"  Attention layers used: last {int(model.config.num_hidden_layers * 0.5)}")
     print()
 
     best_loss = float("inf")
@@ -339,14 +337,14 @@ async def train_projector(
             batch = positive_samples[start:start + BATCH_SIZE]
             optimizer.zero_grad()
 
-            # Usa o título da skill como query representativa em vez de "query_N"
-            # Isso ancora o prompt do LLM ao domínio semântico real da skill
+            # Uses skill title as representative query instead of "query_N"
+            # This anchors the LLM prompt to the actual semantic domain of the skill
             batch_skill_vecs = []
             batch_alphas     = []
             queries          = []
 
             for q_vec, s_vec in batch:
-                # Encontra a skill mais próxima do q_vec para nomear a query
+                # Find skill closest to q_vec to name the query
                 sims = [float(np.dot(q_vec, sv) /
                               (np.linalg.norm(q_vec) * np.linalg.norm(sv) + 1e-8))
                         for sv in skill_vecs_store]
@@ -355,8 +353,8 @@ async def train_projector(
                              if skill_titles[best_idx] else "How to solve this technical problem?"
                 queries.append(query_text)
 
-                # Com múltiplas skills: inclui a skill correta + 1 negativa aleatória
-                # Isso treina o projector na mixture, não só em skills isoladas
+                # With multiple skills: include correct skill + 1 random negative
+                # This trains the projector on the mixture, not just isolated skills
                 if len(skill_vecs_store) > 1:
                     neg_candidates = [i for i in range(len(skill_vecs_store))
                                       if not np.allclose(skill_vecs_store[i], s_vec, atol=1e-4)]
@@ -372,7 +370,7 @@ async def train_projector(
                 batch_skill_vecs.append(path_vecs)
                 batch_alphas.append(alphas)
 
-            # Calcula L_align para o batch
+            # Calculate L_align for the batch
             l_align = compute_lalign_for_batch(
                 model=model,
                 tokenizer=tokenizer,
@@ -384,7 +382,7 @@ async def train_projector(
                 device=device,
             )
 
-            # Regularização L2 nos pesos do projector (evita divergência)
+            # L2 regularization on projector weights (prevents divergence)
             l_reg = sum(p.norm() ** 2 for p in projector.parameters()) * 1e-5
 
             loss = lambda_align * l_align + l_reg
@@ -415,15 +413,15 @@ async def train_projector(
                 lr=f"{scheduler.get_last_lr()[0]:.6f}",
             )
 
-    # ── 7. Verificação final ──────────────────────────────────────────────────
-    print(f"\n  Melhor L_align: {best_loss:.4f}")
-    print(f"  Projector salvo em: {projector_path}")
+    # ── 7. Final Verification ──────────────────────────────────────────────────
+    print(f"\n  Best L_align: {best_loss:.4f}")
+    print(f"  Projector saved to: {projector_path}")
 
-    # Confirma que o projector divergiu de eye_
+    # Confirm projector diverged from eye_
     proj = SkillProjector.load(
         projector_path, embed_dim=384, llm_hidden_size=hidden_size, device=device
     )
-    print(f"  Projector treinado: {proj.is_trained}")
+    print(f"  Projector trained: {proj.is_trained}")
 
     return {"best_loss": best_loss, "path": str(projector_path)}
 
@@ -432,35 +430,35 @@ async def train_projector(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Treina o SkillProjector com L_align (S-Path-RAG Gap 2)",
+        description="Trains SkillProjector with L_align (S-Path-RAG Gap 2)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument("--skill-dir",  default="./skills_output")
     parser.add_argument("--model-id",   default=DEFAULT_MODEL_ID,
-                        help=f"Modelo Qwen (default: {DEFAULT_MODEL_ID})")
+                        help=f"Qwen model (default: {DEFAULT_MODEL_ID})")
     parser.add_argument("--data-cache", default="train_data.npz")
     parser.add_argument("--regen-data", action="store_true",
-                        help="Regenera o dataset mesmo que o cache exista (use ao adicionar novas skills)")
+                        help="Regenerates dataset even if cache exists (use when adding new skills)")
     parser.add_argument("--epochs",     type=int,   default=30)
     parser.add_argument("--lr",         type=float, default=5e-4)
     parser.add_argument("--lambda-align", type=float, default=LAMBDA_ALIGN,
-                        help="Peso do L_align na loss (default: 0.5)")
+                        help="L_align weight in loss (default: 0.5)")
     args = parser.parse_args()
 
     if not Path(args.skill_dir).exists():
-        print(f"ERRO: '{args.skill_dir}' não encontrada.")
+        print(f"ERROR: '{args.skill_dir}' not found.")
         sys.exit(1)
 
     print("\n" + "=" * 60)
     print("  SkillProjector Training — L_align (S-Path-RAG Eq 7+8)")
     print("=" * 60)
 
-    # Aviso quando há cache antigo e regen não foi pedido
+    # Warning when old cache exists and regen not requested
     cache = Path(args.data_cache)
     if cache.exists() and not args.regen_data:
-        print(f"\n  AVISO: Usando dataset em cache '{args.data_cache}'.")
-        print("  Se você adicionou novas skills, use --regen-data para incluí-las.")
+        print(f"\n  WARNING: Using cached dataset '{args.data_cache}'.")
+        print("  If you added new skills, use --regen-data to include them.")
         print()
 
     asyncio.run(train_projector(
@@ -472,10 +470,10 @@ def main():
         lambda_align = args.lambda_align,
     ))
 
-    print("\n  Próximos passos:")
-    print("  1. O local_llm.py carrega o projector automaticamente")
-    print("  2. Use --mode injection para ativar a injeção treinada")
-    print("  3. Execute: openskill retrieve --local --mode injection --query 'sua query'")
+    print("\n  Next steps:")
+    print("  1. local_llm.py loads the projector automatically")
+    print("  2. Use --mode injection to activate trained injection")
+    print("  3. Run: openskill retrieve --local --mode injection --query 'your query'")
 
 
 if __name__ == "__main__":

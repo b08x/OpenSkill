@@ -3,7 +3,7 @@ import re
 import os
 import sys
 
-# --- CONFIGURAÇÃO ---
+# --- CONFIGURATION ---
 MY_OPENROUTER_KEY = "sk-or-v1-"
 
 TASKS = [
@@ -20,7 +20,7 @@ TASKS = [
 ]
 
 def run_command(command):
-    print(f"\n> Executando: {command}")
+    print(f"\n> Executing: {command}")
     try:
         result = subprocess.run(
             command,
@@ -33,55 +33,55 @@ def run_command(command):
         )
 
         if result.returncode != 0:
-            print(f"AVISO: O comando retornou erro (code {result.returncode})")
+            print(f"WARNING: Command returned an error (code {result.returncode})")
             print(f"Stderr: {result.stderr}")
 
         return result.stdout if result.stdout else ""
     except Exception as e:
-        print(f"ERRO CRÍTICO ao executar comando: {e}")
+        print(f"CRITICAL ERROR while executing command: {e}")
         return ""
 
 def main():
     if not MY_OPENROUTER_KEY:
-        print("ERRO: Configure a chave OPENROUTER_API_KEY no script!")
+        print("ERROR: Configure the OPENROUTER_API_KEY in the script!")
         return
 
     os.environ["OPENROUTER_API_KEY"] = MY_OPENROUTER_KEY
 
     skill_ids = []
-    print("=== Iniciando Criação da Biblioteca OpenSkill (UTF-8 Mode) ===")
+    print("=== Starting OpenSkill Library Creation (UTF-8 Mode) ===")
 
     for i, task in enumerate(TASKS):
         print(f"\n" + "=" * 40)
-        print(f"--- Criando Skill {i + 1}/{len(TASKS)} ---")
-        print(f"Tarefa: {task}")
+        print(f"--- Creating Skill {i + 1}/{len(TASKS)} ---")
+        print(f"Task: {task}")
 
         # 1. openskill create
         cmd_create = f'openskill create "{task}" --api-key {MY_OPENROUTER_KEY}'
         output = run_command(cmd_create)
 
-        # 2. Extrair o ID
+        # 2. Extract ID
         match = re.search(r"ID:.*?([a-f0-9]{8})", output, re.IGNORECASE)
 
         if match:
             skill_id = match.group(1)
             skill_ids.append(skill_id)
-            print(f"SUCESSO: ID {skill_id} criado.")
+            print(f"SUCCESS: ID {skill_id} created.")
 
-            # 3. Gerar Embedding Local (CORRIGIDO: Removido --skill-id)
-            print(f"Gerando embedding local (384d)...")
+            # 3. Generate Local Embedding (FIXED: Removed --skill-id)
+            print(f"Generating local embedding (384d)...")
             run_command(f"openskill embed {skill_id} --local")
         else:
-            print("AVISO: Não consegui capturar o ID automaticamente.")
+            print("WARNING: Could not capture the ID automatically.")
 
-    # 4. Refinamento GNN
+    # 4. GNN Refinement
     print("\n" + "=" * 50)
-    print("ETAPA FINAL: Refinando biblioteca com GNN...")
+    print("FINAL STAGE: Refining library with GNN...")
     print("=" * 50)
     run_command("openskill build-graph --use-gnn")
 
-    print("\n=== PROCESSO CONCLUÍDO ===")
-    print(f"Skills processadas: {len(skill_ids)}")
+    print("\n=== PROCESS COMPLETED ===")
+    print(f"Processed skills: {len(skill_ids)}")
 
 if __name__ == "__main__":
     main()

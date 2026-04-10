@@ -10,7 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch_geometric.nn as gnn
-# Usamos safetensors por ser mais rápido, seguro e padrão na indústria (SaaS)
+# We use safetensors as it is faster, more secure, and an industry standard (SaaS)
 from safetensors.torch import save_file, load_file
 import structlog
 
@@ -24,48 +24,48 @@ class SkillGNN(nn.Module):
         self.conv2 = gnn.GCNConv(hidden_dim, hidden_dim)
         self.relu = nn.ReLU()
 
-        # Inicialização Identidade Segura
+        # Safe Identity Initialization
         with torch.no_grad():
-            # Acessa o peso da camada linear interna da GCN
+            # Accesses the weight of the internal GCN linear layer
             if hasattr(self.conv1, 'lin'):
                 nn.init.eye_(self.conv1.lin.weight)
                 nn.init.eye_(self.conv2.lin.weight)
             else:
-                # Fallback para versões onde o peso está na raiz
+                # Fallback for versions where the weight is at the root
                 nn.init.eye_(self.conv1.weight)
                 nn.init.eye_(self.conv2.weight)
 
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
-        identity = x  # Salva o original
+        identity = x  # Saves the original
 
         x = self.relu(self.conv1(x, edge_index))
         x = self.conv2(x, edge_index)
 
-        # S-Path-RAG Residual Connection: Mantém a base semântica original
+        # S-Path-RAG Residual Connection: Maintains the original semantic base
         return x + identity
 
 def encode_graph_embeddings(
     metas: list[Any],
     edges: list[dict],
     embed_dim: int,
-    save_dir: Path = None  # Recebe a pasta raiz para salvar/carregar o cérebro
+    save_dir: Path = None  # Receives the root folder to save/load the brain
 ) -> dict[str, np.ndarray]:
 
     if not metas: return {}
 
-    # Helper ultra-robusto para pegar propriedades sem erro de tipo
+    # Ultra-robust helper for getting properties without type errors
     def _val(obj, key, default=None):
         if isinstance(obj, dict):
             return obj.get(key, default)
         return getattr(obj, key, default)
 
-    # Helper para extrair o embedding correto da dimensão exigida
+    # Helper to extract the correct embedding for the required dimension
     def get_emb(m):
         emb = _val(m, 'embedding')
         if emb and len(emb) == embed_dim:
             return emb
 
-        # Tenta achar nos perfis multi-view
+        # Tries to find in multi-view profiles
         vectors = _val(m, 'vectors') or {}
         if isinstance(vectors, dict):
             for p in vectors.values():
@@ -76,14 +76,14 @@ def encode_graph_embeddings(
 
         return [0.0] * embed_dim
 
-    # 1. Mapear IDs para índices (Agota seguro contra AttributeError)
+    # 1. Map IDs to indices (Now safe against AttributeError)
     node_list = sorted([_val(m, 'id') for m in metas if _val(m, 'id')])
     id_map = {sid: i for i, sid in enumerate(node_list)}
 
-    # 2. Criar matriz de atributos (x) - USANDO O HELPER
+    # 2. Create attribute matrix (x) - USING THE HELPER
     x = torch.tensor([get_emb(m) for m in metas if _val(m, 'id')], dtype=torch.float32)
 
-    # 3. Criar arestas (edge_index)
+    # 3. Create edges (edge_index)
     edge_idx = []
     for e in edges:
         if e['from'] in id_map and e['to'] in id_map:
@@ -92,29 +92,29 @@ def encode_graph_embeddings(
     if edge_idx:
         edge_index = torch.tensor(edge_idx, dtype=torch.long).t().contiguous()
     else:
-        # Cria um tensor vazio válido se não houver arestas
+        # Creates a valid empty tensor if there are no edges
         edge_index = torch.empty((2, 0), dtype=torch.long)
 
-    # 4. Inicializar GNN
+    # 4. Initialize GNN
     model = SkillGNN(input_dim=embed_dim, hidden_dim=embed_dim)
 
-    # ─── LÓGICA DE PERSISTÊNCIA DA GNN (SAAS READY) ───
+    # ─── GNN PERSISTENCE LOGIC (SAAS READY) ───
     if save_dir:
         model_path = save_dir / "gnn_brain.safetensors"
         if model_path.exists():
             try:
-                # Carrega o cérebro que já evoluiu
+                # Loads the brain that has already evolved
                 weights = load_file(model_path)
                 model.load_state_dict(weights)
                 log.info("gnn.loaded_weights", path=str(model_path))
             except Exception as e:
                 log.error("gnn.load_error", error=str(e))
         else:
-            # Primeira execução: salva os pesos iniciais para treinarmos no futuro
+            # First run: saves initial weights for future training
             save_file(model.state_dict(), model_path)
             log.info("gnn.initialized_weights", path=str(model_path))
 
-    # 5. Inferência
+    # 5. Inference
     model.eval()
     with torch.no_grad():
         updated_embeddings = model(x, edge_index)

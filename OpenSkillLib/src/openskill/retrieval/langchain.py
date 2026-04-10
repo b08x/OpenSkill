@@ -1,10 +1,10 @@
 """
 LangChain Integration — OpenSkillRetriever
 =========================================
-Transforma o OpenSkill num BaseRetriever do LangChain para usar
-em RetrievalQA, ConversationalRetrievalChain, AgentExecutor, etc.
+Transforms OpenSkill into a LangChain BaseRetriever for use 
+in RetrievalQA, ConversationalRetrievalChain, AgentExecutor, etc.
 
-Uso:
+Usage:
 
     from langchain.chains import RetrievalQA
     from openskill.retrieval.langchain import OpenSkillRetriever
@@ -35,10 +35,10 @@ if TYPE_CHECKING:
 
 class OpenSkillRetriever(BaseRetriever):
     """
-    LangChain BaseRetriever que busca skills via TurboQuant + S-Path-RAG.
+    LangChain BaseRetriever that searches for skills via TurboQuant + S-Path-RAG.
 
-    Os documentos retornados são as constraints normativas extraídas
-    das skills mais relevantes, formatadas como LangChain Documents.
+    The returned documents are normative constraints extracted from 
+    the most relevant skills, formatted as LangChain Documents.
     """
 
     def __init__(
@@ -51,7 +51,7 @@ class OpenSkillRetriever(BaseRetriever):
         ollama_model: str = "qwen2.5-coder:7b",
         **client_kwargs,
     ):
-        # Determina storage e LLM provider
+        # Determines storage and LLM provider
         store = LocalDiskStore(skill_dir)
 
         if use_ollama:
@@ -60,14 +60,14 @@ class OpenSkillRetriever(BaseRetriever):
             from openskill.llm.openrouter import OpenRouterProvider
             llm = OpenRouterProvider(api_key=llm_api_key)
         else:
-            llm = None  # Usa padrão do client (OpenRouter ou falha)
+            llm = None  # Uses client default (OpenRouter or fails)
 
         self._client = OpenSkillClient(store=store, llm=llm, **client_kwargs)
         self.top_k = top_k
         self.format = format
 
     def _extract_constraints(self, markdown: str) -> str:
-        """Extrai apenas as Normative Constraints do markdown."""
+        """Extracts only Normative Constraints from markdown."""
         lines = []
         in_constraints = False
         for line in markdown.split("\n"):
@@ -79,13 +79,13 @@ class OpenSkillRetriever(BaseRetriever):
             if in_constraints and line.startswith("## "):
                 break
             if in_constraints and line.strip():
-                # Remove formatação markdown dos bullets
+                # Removes markdown formatting from bullets
                 cleaned = re.sub(r"^[-*]\s*", "", line)
                 lines.append(cleaned)
         return "\n".join(lines) if lines else markdown[:500]
 
     def _skill_to_document(self, skill_data: dict) -> Document:
-        """Converte uma skill em LangChain Document."""
+        """Converts a skill to a LangChain Document."""
         content = skill_data.get("content", "")
         meta = {
             "skill_id": skill_data.get("id", ""),
@@ -109,7 +109,7 @@ class OpenSkillRetriever(BaseRetriever):
         *,
         run_manager: CallbackManagerForRetrieverRun | None = None,
     ) -> list[Document]:
-        """Versão síncrona (LangChain sync runner)."""
+        """Synchronous version (LangChain sync runner)."""
         import asyncio
         return asyncio.run(self._aget_relevant_documents(query, run_manager))
 
@@ -118,19 +118,19 @@ class OpenSkillRetriever(BaseRetriever):
         query: str,
         run_manager: CallbackManagerForRetrieverRun | None = None,
     ) -> list[Document]:
-        """Busca async via TurboQuant + S-Path-RAG."""
+        """Async search via TurboQuant + S-Path-RAG."""
         result = await self._client.retrieve(query=query, top_k=self.top_k)
 
         docs = []
         for skill in result.get("skills", []):
-            # Enrich skill com content do store
+            # Enrich skill with store content
             skill_md = await self._client.store.get_skill_md(skill.get("id", ""))
             if skill_md:
                 skill["content"] = skill_md
             doc = self._skill_to_document(skill)
             docs.append(doc)
 
-        # Callback para o LangChain
+        # LangChain callback
         if run_manager:
             await run_manager.on_retriever_end(
                 documents=docs,

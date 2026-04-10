@@ -1,35 +1,35 @@
 """
 cross_attention.py — S-Path-RAG Gap 3: Cross-Attention Injection (Eq 6)
 ========================================================================
-Implementa a Eq 6 do paper:
+Implements Eq 6 from the paper:
 
     Attn(Q_tok, K_graph, V_graph) = softmax(Q_tok @ K_graph.T / sqrt(d)) @ V_graph
 
-Onde:
-    Q_tok   = hidden states dos tokens do LLM na camada alvo
-    K_graph = projeção dos vetores de skill para o espaço de keys
-    V_graph = projeção dos vetores de skill para o espaço de values
+Where:
+    Q_tok   = LLM token hidden states at the target layer
+    K_graph = projection of skill vectors to key space
+    V_graph = projection of skill vectors to value space
 
-Diferença da injeção por prefix (Gap 2):
-    - Prefix injection: skills entram como tokens extras no início da sequência
-      O LLM pode ignorá-las nas camadas profundas onde o contexto já foi consolidado.
-    - Cross-attention injection: skills são injetadas diretamente nas camadas
-      escolhidas via mecanismo de atenção próprio, garantindo que cada camada
-      alvo "veja" o conhecimento das skills independente do que veio antes.
+Difference from prefix injection (Gap 2):
+    - Prefix injection: skills enter as extra tokens at the start of the sequence.
+      The LLM may ignore them in deep layers where context is already consolidated.
+    - Cross-attention injection: skills are injected directly into chosen layers
+      via their own attention mechanism, ensuring each target layer "sees" 
+      skill knowledge regardless of previous context.
 
-Implementação:
-    - CrossAttentionInjector: nn.Module com K_proj, V_proj, gate por camada
-    - Instalado via register_forward_hook nas últimas N camadas do Qwen
-    - Gate inicializado em 0.0 → efeito nulo na inferência não treinada
-    - Gate cresce com treino → efeito controlado (~0.1 a 0.3 na prática)
-    - Hooks removíveis: .remove_hooks() → modelo volta ao estado original
+Implementation:
+    - CrossAttentionInjector: nn.Module with K_proj, V_proj, and per-layer gate
+    - Installed via register_forward_hook in the last N layers of Qwen
+    - Gate initialized at 0.0 → null effect in untrained inference
+    - Gate grows with training → controlled effect (~0.1 to 0.3 in practice)
+    - Removable hooks: .remove_hooks() → model returns to original state
 
-Uso:
+Usage:
     injector = CrossAttentionInjector(hidden_size=2048, n_layers=7)
-    injector.install(model)           # instala hooks
-    injector.set_skill_context(kvecs) # define K_graph e V_graph
-    out = model.generate(...)         # geração com cross-attention
-    injector.remove_hooks()           # limpa hooks
+    injector.install(model)           # installs hooks
+    injector.set_skill_context(kvecs) # defines K_graph and V_graph
+    out = model.generate(...)         # generation with cross-attention
+    injector.remove_hooks()           # cleans up hooks
 """
 
 from __future__ import annotations
@@ -46,36 +46,36 @@ import structlog
 log = structlog.get_logger()
 
 INJECTOR_SAVE_NAME  = "cross_attn_injector.safetensors"
-# Fração das camadas a receber cross-attention (últimas N)
-INJECTION_LAYER_FRAC = 0.25   # 25% → Qwen3.5-2B: layers 21-27 (7 de 28)
+# Fraction of layers to receive cross-attention (last N)
+INJECTION_LAYER_FRAC = 0.25   # 25% → Qwen3.5-2B: layers 21-27 (7 of 28)
 MIN_INJECTION_LAYERS = 4
 
 
-# ── Módulo principal ──────────────────────────────────────────────────────────
+# ── Main Module ──────────────────────────────────────────────────────────
 
 class CrossAttentionInjector(nn.Module):
     """
-    Injeta K_graph e V_graph via cross-attention nas camadas profundas do Qwen.
+    Injects K_graph and V_graph via cross-attention in deep layers of Qwen.
 
     Eq 6: output += gate * Attn(Q_tok, K_graph, V_graph)
 
-    Parâmetros treináveis por instância:
-        k_proj: Linear(embed_dim, hidden_size)  — projeta skills → keys
-        v_proj: Linear(embed_dim, hidden_size)  — projeta skills → values
-        gates:  [n_layers]  — gate escalar por camada, init=0.0
+    Trainable parameters per instance:
+        k_proj: Linear(embed_dim, hidden_size)  — projects skills → keys
+        v_proj: Linear(embed_dim, hidden_size)  — projects skills → values
+        gates:  [n_layers]  — scalar gate per layer, init=0.0
 
-    Parâmetros não treináveis (contexto de inferência):
-        _K_graph: [1, N_skills, hidden_size]  — keys pré-computadas
-        _V_graph: [1, N_skills, hidden_size]  — values pré-computadas
-        _alphas:  [N_skills]  — pesos por skill (Eq 5)
+    Non-trainable parameters (inference context):
+        _K_graph: [1, N_skills, hidden_size]  — precomputed keys
+        _V_graph: [1, N_skills, hidden_size]  — precomputed values
+        _alphas:  [N_skills]  — weights per skill (Eq 5)
     """
 
     def __init__(
         self,
-        embed_dim: int = 384,        # dimensão dos vetores MiniLM
-        hidden_size: int = 2048,     # hidden size do Qwen
-        n_layers: int = 7,           # quantas camadas recebem cross-attention
-        num_heads: int = 16,         # num_key_value_heads do Qwen (para head_dim)
+        embed_dim: int = 384,        # dimension of MiniLM vectors
+        hidden_size: int = 2048,     # Qwen hidden size
+        n_layers: int = 7,           # how many layers receive cross-attention
+        num_heads: int = 16,         # Qwen num_key_value_heads (for head_dim)
     ):
         super().__init__()
         self.embed_dim   = embed_dim
@@ -84,21 +84,21 @@ class CrossAttentionInjector(nn.Module):
         self.num_heads   = num_heads
         self.head_dim    = hidden_size // num_heads
 
-        # Projetores compartilhados entre todas as camadas
+        # Shared projectors across all layers
         self.k_proj = nn.Linear(embed_dim, hidden_size, bias=False)
         self.v_proj = nn.Linear(embed_dim, hidden_size, bias=False)
 
-        # Gate por camada — inicializado em 0.0 (sem efeito inicial)
-        # Usa tanh gate: output *= tanh(gate) → bounded em (-1, 1)
+        # Per-layer gate — initialized at 0.0 (no initial effect)
+        # Uses tanh gate: output *= tanh(gate) → bounded within (-1, 1)
         self.gates = nn.Parameter(torch.zeros(n_layers))
 
-        # Contexto de inferência (não treináveis, definidos em set_skill_context)
+        # Inference context (non-trainable, defined in set_skill_context)
         self._K_graph: Optional[torch.Tensor] = None   # [1, N, H]
         self._V_graph: Optional[torch.Tensor] = None   # [1, N, H]
         self._alphas:  Optional[torch.Tensor] = None   # [N]
         self._hooks: list = []
 
-        # Inicialização de Xavier para K e V proj
+        # Xavier initialization for K and V proj
         nn.init.xavier_uniform_(self.k_proj.weight)
         nn.init.xavier_uniform_(self.v_proj.weight)
 
@@ -110,10 +110,10 @@ class CrossAttentionInjector(nn.Module):
         dtype: torch.dtype = torch.bfloat16,
     ) -> None:
         """
-        Pré-computa K_graph e V_graph a partir dos vetores de skill.
-        Deve ser chamado antes de cada geração.
+        Precomputes K_graph and V_graph from skill vectors.
+        Must be called before each generation.
 
-        Eq 5 integrado: K e V são escalados por alpha_p antes da atenção.
+        Integrated Eq 5: K and V are scaled by alpha_p before attention.
         """
         if not skill_vectors:
             self._K_graph = None
@@ -121,24 +121,24 @@ class CrossAttentionInjector(nn.Module):
             self._alphas  = None
             return
 
-        # --- CORREÇÃO: Adicionado .to(dtype) no final ---
+        # --- FIX: Added .to(dtype) at the end ---
         skills_t = torch.tensor(
             np.array(skill_vectors), dtype=torch.float32, device=device
         ).to(dtype)
 
         with torch.no_grad():
-            # Projeta para o espaço do LLM
+            # Projects to LLM space
             K = self.k_proj(skills_t)  # [N, hidden_size]
             V = self.v_proj(skills_t)  # [N, hidden_size]
 
-            # --- CORREÇÃO: LIMITADOR DE ENERGIA (NORMALIZAÇÃO L2) ---
-            # Impede que a norma exploda para 23 bilhões. Força o tamanho
-            # a ser igual à biologia do LLM (sqrt(hidden_size))
+            # --- FIX: ENERGY LIMITER (L2 NORMALIZATION) ---
+            # Prevents norm from exploding to 23 billion. Forces size 
+            # to match LLM biology (sqrt(hidden_size))
             K = F.normalize(K, p=2, dim=-1) * (self.hidden_size ** 0.5)
             V = F.normalize(V, p=2, dim=-1) * (self.hidden_size ** 0.5)
             # --------------------------------------------------------
 
-            # Escala por alpha_p (Eq 5): skills mais relevantes têm keys/values maiores
+            # Scales by alpha_p (Eq 5): more relevant skills have larger keys/values
             if skill_alphas and len(skill_alphas) == len(skill_vectors):
                 alpha_t = torch.tensor(
                     skill_alphas, dtype=dtype, device=device
@@ -159,13 +159,13 @@ class CrossAttentionInjector(nn.Module):
     def _cross_attn_output(
         self,
         hidden_states: torch.Tensor,  # [B, T, H]
-        layer_idx: int,               # índice relativo (0 = primeira camada alvo)
+        layer_idx: int,               # relative index (0 = first target layer)
     ) -> torch.Tensor:
         """
-        Calcula Attn(Q_tok, K_graph, V_graph) para uma camada.
+        Calculates Attn(Q_tok, K_graph, V_graph) for a layer.
 
         Eq 6: softmax(Q @ K_graph.T / sqrt(d)) @ V_graph
-        Saída: [B, T, H] — mesmo shape que hidden_states
+        Output: [B, T, H] — same shape as hidden_states
         """
         if self._K_graph is None or self._V_graph is None:
             return torch.zeros_like(hidden_states)
@@ -176,9 +176,9 @@ class CrossAttentionInjector(nn.Module):
 
         N = K_g.shape[1]
 
-        # Q: [B, T, H] → reshape para multi-head: [B, num_heads, T, head_dim]
+        # Q: [B, T, H] → reshape for multi-head: [B, num_heads, T, head_dim]
         # K_g, V_g: [B, N, H] → [B, num_heads, N, head_dim]
-        # (usamos hidden_size // num_heads como head_dim)
+        # (we use hidden_size // num_heads as head_dim)
         nH  = self.num_heads
         hD  = self.head_dim
 
@@ -191,20 +191,20 @@ class CrossAttentionInjector(nn.Module):
         attn_w = torch.softmax(Q @ K.transpose(-2, -1) * scale, dim=-1)  # [B, nH, T, N]
         attn_out = attn_w @ V                                              # [B, nH, T, hD]
 
-        # Volta para [B, T, H]
+        # Back to [B, T, H]
         attn_out = attn_out.transpose(1, 2).reshape(B, T, H)
 
-        # Gate por camada (tanh para limitar amplitude)
+        # Per-layer gate (tanh to limit amplitude)
         gate = torch.tanh(self.gates[layer_idx])
 
         return attn_out * gate
 
     def _make_hook(self, layer_idx: int):
-        """Cria o forward hook para a camada layer_idx."""
+        """Creates the forward hook for layer layer_idx."""
 
         def hook(module, input, output):
-            # output do DecoderLayer é uma tuple: (hidden_states, *extras)
-            # extras podem ser: attn_weights, present_kv (opcionais)
+            # DecoderLayer output is a tuple: (hidden_states, *extras)
+            # extras can be: attn_weights, present_kv (optional)
             if isinstance(output, tuple):
                 hidden_states = output[0]
                 rest = output[1:]
@@ -212,7 +212,7 @@ class CrossAttentionInjector(nn.Module):
                 hidden_states = output
                 rest = None
 
-            # Só injeta se o contexto foi definido
+            # Only injects if context is defined
             if self._K_graph is None:
                 return output
 
@@ -232,12 +232,12 @@ class CrossAttentionInjector(nn.Module):
 
     def install(self, model: nn.Module) -> None:
         """
-        Instala os hooks nas últimas n_layers camadas do Qwen.
-        Idempotente: remove hooks antigos antes de instalar novos.
+        Installs hooks in the last n_layers of Qwen.
+        Idempotent: removes old hooks before installing new ones.
         """
         self.remove_hooks()
 
-        # Navega até as decoder layers
+        # Navigates to decoder layers
         layers = None
         for attr in ["model", "transformer"]:
             backbone = getattr(model, attr, None)
@@ -266,19 +266,19 @@ class CrossAttentionInjector(nn.Module):
         )
 
     def remove_hooks(self) -> None:
-        """Remove todos os hooks instalados. Modelo volta ao estado original."""
+        """Removes all installed hooks. Model returns to original state."""
         for h in self._hooks:
             h.remove()
         self._hooks.clear()
         log.debug("cross_attn.hooks_removed")
 
     def clear_context(self) -> None:
-        """Limpa o contexto de skill após a geração."""
+        """Clears skill context after generation."""
         self._K_graph = None
         self._V_graph = None
         self._alphas  = None
 
-    # ── Persistência ──────────────────────────────────────────────────────────
+    # ── Persistence ──────────────────────────────────────────────────────────
 
     def save(self, path: str | Path) -> None:
         from safetensors.torch import save_file
@@ -308,22 +308,22 @@ class CrossAttentionInjector(nn.Module):
 
     @property
     def is_trained(self) -> bool:
-        """True se os gates divergiram de zero."""
+        """True if gates diverged from zero."""
         return float(self.gates.abs().max()) > 1e-4
 
 
-# ── Helper: detecta parâmetros do Qwen automaticamente ───────────────────────
+# ── Helper: automatically detects Qwen parameters ───────────────────────
 
 def detect_qwen_params(model: nn.Module) -> dict:
     """
-    Detecta hidden_size, num_heads e n_layers a partir do model.config.
-    Retorna dict compatível com CrossAttentionInjector.__init__.
+    Detects hidden_size, num_heads, and n_layers from model.config.
+    Returns dict compatible with CrossAttentionInjector.__init__.
     """
     cfg = model.config
     hidden_size = cfg.hidden_size
 
-    # Qwen2/Qwen3 usa num_key_value_heads para GQA
-    # Para o cross-attn usamos num_attention_heads (full heads)
+    # Qwen2/Qwen3 uses num_key_value_heads for GQA
+    # For cross-attn we use num_attention_heads (full heads)
     num_heads = getattr(cfg, "num_attention_heads", hidden_size // 128)
 
     total_layers = cfg.num_hidden_layers

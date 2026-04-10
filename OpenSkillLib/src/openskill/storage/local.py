@@ -1,8 +1,8 @@
 """
-LocalDiskStore — Armazenamento 100% Local e Gratuito
+LocalDiskStore — 100% Local and Free Storage
 ======================================================
-Salva skills como arquivos .md/.json no disco do desenvolvedor.
-Não requer API key, não manda dados para nenhum servidor.
+Saves skills as .md/.json files on the developer's disk.
+Does not require an API key, does not send data to any server.
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ if TYPE_CHECKING:
 
 class LocalDiskStore(BaseSkillStore):
     """
-    Adapter de armazenamento que salva tudo no disco local.
+    Storage adapter that saves everything to the local disk.
 
-    Estrutura de diretórios:
+    Directory structure:
         <path>/
         ├── skills/
         │   ├── raft_consensus_a493a4b2.md
@@ -85,9 +85,8 @@ class LocalDiskStore(BaseSkillStore):
             metadata: SkillMetadata,
     ) -> None:
         """
-        Implementação obrigatória da interface BaseSkillStore.
-        Redireciona para o novo sistema de pacotes (Bundles) do EvoSkills
-        passando código executável vazio.
+        Mandatory implementation of the BaseSkillStore interface.
+        Redirects to the new EvoSkills bundle system passing empty executable code.
         """
         await self.save_skill_bundle(skill_id, markdown, metadata, executable_code="")
 
@@ -99,32 +98,32 @@ class LocalDiskStore(BaseSkillStore):
         executable_code: str = ""
     ) -> None:
         """
-        Nova Estrutura (EvoSkills Bundle):
+        New Structure (EvoSkills Bundle):
         skills_output/
         └── <skill_id>/
-            ├── SKILL.md            # Conhecimento Declarativo (MemCollab)
-            ├── meta.json           # Vetores S-Path e Level (Ficha RPG)
+            ├── SKILL.md            # Declarative Knowledge (MemCollab)
+            ├── meta.json           # S-Path Vectors and Level (RPG Sheet)
             └── scripts/
-                └── utils.py        # Código Ativo (EvoSkills)
+                └── utils.py        # Active Code (EvoSkills)
         """
         bundle_dir = self.skills_dir / skill_id
         bundle_dir.mkdir(parents=True, exist_ok=True)
 
-        # Atualiza a rota do arquivo MD nos metadados
+        # Update MD file route in metadata
         metadata.filename = f"{skill_id}/SKILL.md"
 
-        # 1. Salva a "Aura" (Regras Passivas em Markdown)
+        # 1. Save the "Aura" (Passive rules in Markdown)
         md_path = bundle_dir / "SKILL.md"
         md_path.write_text(markdown, encoding="utf-8")
 
-        # 2. Salva os "Status" (Meta.json)
+        # 2. Save "Status" (Meta.json)
         meta_path = bundle_dir / "meta.json"
         meta_path.write_text(
             json.dumps(metadata.to_dict(), indent=2),
             encoding="utf-8",
         )
 
-        # 3. Salva a "Magia Ativa" (Python Script)
+        # 3. Save "Active Magic" (Python Script)
         if executable_code or metadata.skill_type in [SkillType.ACTIVE, SkillType.HYBRID]:
             scripts_dir = bundle_dir / "scripts"
             scripts_dir.mkdir(exist_ok=True)
@@ -133,20 +132,20 @@ class LocalDiskStore(BaseSkillStore):
 
     async def get_skill_meta(self, skill_id: str) -> Optional[SkillMetadata]:
         sid = skill_id.strip()
-        # 1. Novo formato: skills/{skill_id}/meta.json (save_skill_bundle)
+        # 1. New format: skills/{skill_id}/meta.json (save_skill_bundle)
         bundle_meta = self.skills_dir / sid / "meta.json"
         if bundle_meta.exists():
             try:
                 return SkillMetadata.from_dict(json.loads(bundle_meta.read_text(encoding="utf-8")))
             except Exception:
                 pass
-        # 2. Legado: {skill_id}.json na raiz de skills/
+        # 2. Legacy: {skill_id}.json in skills/ root
         for f in self.skills_dir.glob(f"{sid}.json"):
             try:
                 return SkillMetadata.from_dict(json.loads(f.read_text(encoding="utf-8")))
             except Exception:
                 pass
-        # 3. Fallback amplo (qualquer lugar)
+        # 3. Broad fallback (anywhere)
         for f in self.root.rglob("meta.json"):
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
@@ -160,7 +159,7 @@ class LocalDiskStore(BaseSkillStore):
         meta = await self.get_skill_meta(skill_id)
         if meta is None: return None
 
-        # Procura o Markdown onde quer que ele esteja
+        # Search for Markdown wherever it is
         paths = [self.skills_dir / meta.filename, self.root / meta.filename]
         for p in paths:
             if p.exists():
@@ -169,7 +168,7 @@ class LocalDiskStore(BaseSkillStore):
 
     async def list_skills(self) -> list[SkillMetadata]:
         metas: list[SkillMetadata] = []
-        # rglob procura em TUDO (arquivos meta.json dentro das pastas e .json na raiz)
+        # rglob searches EVERYTHING (meta.json files inside folders and .json at root)
         files = list(self.root.rglob("meta.json")) + list(self.root.glob("*.json"))
 
         seen_ids = set()
@@ -209,7 +208,7 @@ class LocalDiskStore(BaseSkillStore):
         meta = await self.get_skill_meta(skill_id)
         if meta is None: return
 
-        # Cria ou atualiza o perfil específico
+        # Create or update specific profile
         profile_key = f"{model_name}_{dimension}".replace("/", "_")
         meta.vectors[profile_key] = SkillVectorProfile(
             model=model_name,
@@ -219,18 +218,18 @@ class LocalDiskStore(BaseSkillStore):
             embedding=embedding
         )
 
-        # Mantém compatibilidade com campos antigos
+        # Maintain compatibility with old fields
         meta.qvector = qvector
         meta.embedding = embedding
 
-        # CORRIGIDO: salva no bundle (meta.json) se existir, senão no legado (.json)
-        # Antes sempre salvava em {skill_id}.json, ignorando o bundle — o bootstrap
-        # não encontrava os vetores porque lia de skills/{id}/meta.json.
+        # FIXED: save in bundle (meta.json) if it exists, otherwise in legacy (.json)
+        # Before it always saved in {skill_id}.json, ignoring the bundle — bootstrap
+        # did not find vectors because it read from skills/{id}/meta.json.
         bundle_meta = self.skills_dir / skill_id / "meta.json"
         if bundle_meta.exists():
             meta_path = bundle_meta
         else:
-            # Legado: skill criada antes do sistema de bundles
+            # Legacy: skill created before bundle system
             meta_path = self.skills_dir / f"{skill_id}.json"
 
         meta_path.write_text(json.dumps(meta.to_dict(), indent=2), encoding="utf-8")

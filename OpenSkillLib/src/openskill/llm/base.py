@@ -1,8 +1,8 @@
 """
 LLM Provider Abstraction — Plugin Pattern
 ==========================================
-Qualquer provedor de LLM (OpenRouter, OpenAI, Anthropic, Ollama, vLLM)
-implementa esta interface.
+Any LLM provider (OpenRouter, OpenAI, Anthropic, Ollama, vLLM)
+implements this interface.
 """
 
 from abc import ABC, abstractmethod
@@ -19,12 +19,12 @@ class LLMMessage:
 @dataclass
 class LLMResponse:
     content: str
-    reasoning: str = ""       # Thinking/reasoning tag (se disponível)
-    raw: dict = None         # Resposta crua da API
+    reasoning: str = ""       # Thinking/reasoning tag (if available)
+    raw: dict = None         # Raw API response
 
 
 class BaseLLMProvider(ABC):
-    """Interface que TODO provedor de LLM deve implementar."""
+    """Interface that EVERY LLM provider must implement."""
 
     @abstractmethod
     async def generate(
@@ -35,28 +35,28 @@ class BaseLLMProvider(ABC):
         **kwargs,
     ) -> LLMResponse:
         """
-        Gera uma resposta de texto.
+        Generates a text response.
 
         Args:
-            messages: Lista de mensagens no formato {role, content}
-            max_tokens: Limite de tokens na resposta
-            temperature: Temperatura de amostragem
+            messages: Message list in {role, content} format
+            max_tokens: Token limit in response
+            temperature: Sampling temperature
         Returns:
-            LLMResponse com conteúdo e metadata
+            LLMResponse with content and metadata
         """
         ...
 
     @abstractmethod
     async def embed(self, text: str) -> list[float]:
-        """Gera embedding semântico (para busca vetorial)."""
+        """Generates semantic embedding (for vector search)."""
         ...
 
     @property
     @abstractmethod
     def model_id(self) -> str:
-        """Identificador do modelo usado."""
+        """Model ID used."""
         ...
 
     async def close(self) -> None:
-        """Cleanup de recursos (opcional)."""
+        """Resource cleanup (optional)."""
         pass

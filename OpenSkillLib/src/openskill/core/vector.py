@@ -1,10 +1,10 @@
 """
 TurboQuantizer — Geometric Skill Memory Layer (Lloyd-Max Optimized)
 ==================================================================
-Implementação rigorosa do TurboQuant (arXiv:2504.19874).
+Strict implementation of TurboQuant (arXiv:2504.19874).
 
-Estágio 1: Rotação Aleatória + Lloyd-Max K-Means Contínuo (MSE Ótimo).
-Estágio 2: 1-bit QJL Residual (Unbiased Inner Product).
+Stage 1: Random Rotation + Continuous Lloyd-Max K-Means (Optimal MSE).
+Stage 2: 1-bit Residual QJL (Unbiased Inner Product).
 """
 
 from __future__ import annotations
@@ -25,25 +25,25 @@ LAMBDA_CORRECTION = 0.1
 
 @dataclass
 class QuantizedVector:
-    qvec: np.ndarray      # int8: Índices dos centroides (0 a 15)
-    residual: np.ndarray  # int8: Sinais do erro QJL (+1 ou -1)
-    centroids: list[float] # float: Os 16 valores ótimos encontrados pelo Lloyd-Max
+    qvec: np.ndarray      # int8: Centroid indices (0 to 15)
+    residual: np.ndarray  # int8: QJL error signs (+1 or -1)
+    centroids: list[float] # float: The 16 optimal values found by Lloyd-Max
     dim: int
 
     def to_dict(self) -> dict:
         return {
             "qvec": self.qvec.tolist(),
             "residual": self.residual.tolist(),
-            "centroids": self.centroids, # Substitui o antigo 'scale'
+            "centroids": self.centroids, # Replaces the old 'scale'
             "dim": self.dim,
             "bits": QUANT_BITS
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> QuantizedVector:
-        # Compatibilidade com o formato antigo (Min-Max Uniforme)
+        # Compatibility with old format (Uniform Min-Max)
         if "scale" in d and "centroids" not in d:
-            # Reconstrói centroides uniformes grosseiramente se ler arquivo velho
+            # Roughly reconstructs uniform centroids if reading an old file
             vmin, vmax = d["scale"]
             step = (vmax - vmin) / (QUANT_LEVELS - 1)
             centroids = [vmin + i * step for i in range(QUANT_LEVELS)]
@@ -79,18 +79,18 @@ class TurboQuantizer:
     def quantize(self, vector: np.ndarray) -> QuantizedVector:
         self._ensure_dimension(vector.shape[0])
 
-        # 1. Rotação Aleatória
+        # 1. Random Rotation
         v_rotated = self._rotation_matrix @ vector
 
-        # 2. Lloyd-Max 1D K-Means (Empírico para a amostra atual)
-        # O paper resolve analiticamente para a distribuição Beta.
-        # Aqui, como processamos online, fazemos um K-Means super rápido nos dados reais do vetor.
+        # 2. 1D Lloyd-Max K-Means (Empirical for the current sample)
+        # The paper resolves analytically for the Beta distribution.
+        # Here, as we process online, we perform a super-fast K-Means on the actual vector data.
         centroids, qvec = self._lloyd_max_1d(v_rotated, QUANT_LEVELS)
 
-        # 3. De-quantização para cálculo do Resíduo
+        # 3. De-quantization for residual calculation
         v_deq_temp = centroids[qvec]
 
-        # 4. QJL Residual
+        # 4. Residual QJL
         residual_error = v_rotated - v_deq_temp
         residual_signs = np.sign(residual_error).astype(np.int8)
         residual_signs[residual_signs == 0] = 1
@@ -105,7 +105,7 @@ class TurboQuantizer:
     def dequantize(self, qv: QuantizedVector) -> np.ndarray:
         self._ensure_dimension(qv.dim)
 
-        # Mapeia os índices de volta para os valores dos centroides ótimos
+        # Maps indices back to optimal centroid values
         centroids_arr = np.array(qv.centroids, dtype=np.float32)
         v_rotated_approx = centroids_arr[qv.qvec]
 
@@ -131,32 +131,32 @@ class TurboQuantizer:
 
     def _lloyd_max_1d(self, data: np.ndarray, num_levels: int, max_iter: int = 20) -> tuple[np.ndarray, np.ndarray]:
         """
-        Implementação rápida do algoritmo de Lloyd-Max para quantização escalar ótima.
-        Encontra 'num_levels' centroides que minimizam o Erro Quadrático Médio (MSE).
+        Fast implementation of the Lloyd-Max algorithm for optimal scalar quantization.
+        Finds 'num_levels' centroids that minimize the Mean Squared Error (MSE).
         """
-        # Inicializa os centroides uniformemente entre o min e o max
+        # Initializes centroids uniformly between min and max
         vmin, vmax = data.min(), data.max()
         centroids = np.linspace(vmin, vmax, num_levels)
 
         q_indices = np.zeros_like(data, dtype=np.int32)
 
         for _ in range(max_iter):
-            # Passo 1: Atribuição (Calcula a distância para todos os centroides e pega o mais próximo)
-            # data[:, None] cria uma matriz coluna para broadcasting com os centroides (linha)
+            # Step 1: Assignment (Calculates distance to all centroids and picks the closest)
+            # data[:, None] creates a column matrix for broadcasting with centroids (row)
             distances = np.abs(data[:, None] - centroids[None, :])
             q_indices = np.argmin(distances, axis=1)
 
-            # Passo 2: Atualização dos centroides
+            # Step 2: Centroid update
             new_centroids = np.zeros_like(centroids)
             for i in range(num_levels):
                 points_in_cluster = data[q_indices == i]
                 if len(points_in_cluster) > 0:
                     new_centroids[i] = np.mean(points_in_cluster)
                 else:
-                    # Se um cluster ficar vazio, mantemos o centroide anterior
+                    # If a cluster becomes empty, we keep the previous centroid
                     new_centroids[i] = centroids[i]
 
-            # Condição de parada: se os centroides não mudarem, convergiu
+            # Stop condition: if centroids do not change, it has converged
             if np.allclose(centroids, new_centroids, atol=1e-6):
                 break
 
@@ -165,7 +165,7 @@ class TurboQuantizer:
         return centroids, q_indices
 
 def pack_qvector(qv: QuantizedVector) -> dict:
-    """Helper para transformar o objeto QuantizedVector em dicionário para o JSON."""
+    """Helper to transform the QuantizedVector object into a dictionary for JSON."""
     return qv.to_dict()
 
 def unpack_qvector(d: dict) -> QuantizedVector:

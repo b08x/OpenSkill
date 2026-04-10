@@ -1,12 +1,12 @@
 """
-CloudSaaSStore — Armazenamento na Nuvem (Modo Pago)
+CloudSaaSStore — Cloud Storage (Paid Mode)
 ====================================================
-Envia todas as operações para a API do OpenSkill Cloud.
-Isto permite:
-  1. Skills compartilhadas entre membros de uma equipe
-  2. Fleet Evolution as a Service (100 agentes em paralelo)
-  3. Grafo de conhecimento corporativo centralizado
-  4. Busca vetorial em Redis/PgVector gerenciado
+Sends all operations to the OpenSkill Cloud API.
+This enables:
+  1. Shared skills among team members
+  2. Fleet Evolution as a Service (100 parallel agents)
+  3. Centralized corporate knowledge graph
+  4. Vector search in managed Redis/PgVector
 """
 
 from __future__ import annotations
@@ -26,13 +26,13 @@ if TYPE_CHECKING:
 
 class CloudSaaSStore(BaseSkillStore):
     """
-    Adapter que conecta ao OpenSkill Cloud API.
+    Adapter that connects to OpenSkill Cloud API.
 
-    Uso:
+    Usage:
         store = CloudSaaSStore(
             api_key="osk_live_xxxxxxxxxxxx",
             workspace="acme-corp",
-            base_url="https://api.openskill.ai",  # opcional, default
+            base_url="https://api.openskill.ai",  # optional, default
         )
     """
 
@@ -76,8 +76,8 @@ class CloudSaaSStore(BaseSkillStore):
     # ── Graph ────────────────────────────────────────────────────────────────
 
     def get_graph(self) -> SkillGraphData:
-        # SÍNCRONO para compatibilidade com o grafo local do S-Path-RAG
-        # Em produção cloud, isso seria cacheado localmente
+        # SYNCHRONOUS for compatibility with S-Path-RAG local graph
+        # In cloud production, this would be locally cached
         import json
         cache_path = f".openskill_graph_{self.workspace}.json"
         try:
@@ -120,7 +120,7 @@ class CloudSaaSStore(BaseSkillStore):
         if resp.status_code == 404:
             return None
         data = resp.json()
-        # O endpoint retorna "metadata" como dict flat
+        # The endpoint returns "metadata" as a flat dict
         return SkillMetadata.from_dict(data.get("metadata", data))
 
     async def list_skills(self) -> list[SkillMetadata]:
@@ -138,11 +138,11 @@ class CloudSaaSStore(BaseSkillStore):
         skill_id: str,
         embedding: list[float],
         qvector: dict,
-        model_name: str,    # Adicionado
-        dimension: int,      # Adicionado
-        provider: str        # Adicionado
+        model_name: str,    # Added
+        dimension: int,      # Added
+        provider: str        # Added
     ) -> None:
-        """Envia o perfil vetorial para a API do OpenSkill Cloud."""
+        """Sends the vector profile to the OpenSkill Cloud API."""
         await self.client.post(
             self._endpoint(f"/skills/{skill_id}/embedding"),
             json={

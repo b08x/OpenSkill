@@ -2,19 +2,19 @@ import os
 import requests
 
 # ==========================================
-# CONFIGURAÇÕES
+# CONFIGURATIONS
 # ==========================================
 RETRIEVE_URL = os.getenv("RETRIEVE_API_URL", "http://localhost:8000/api/retrieve")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
-# Vamos usar um modelo FRACO para provar que a Skill ensina ele a acertar
+# We use a WEAK model to prove that the Skill teaches it to get it right
 TEST_MODEL = "meta-llama/llama-3.1-8b-instruct"
 
 # ==========================================
-# TARGET TASKS (Novos problemas baseados nos benchmarks)
+# TARGET TASKS (New problems based on benchmarks)
 # ==========================================
-# Se a Skill funcionou, ela tem que ajudar o modelo a resolver estes problemas novos:
+# If the Skill worked, it should help the model solve these new problems:
 TARGET_TASKS = [
     {
         "name": "Target: Number Theory",
@@ -32,7 +32,7 @@ TARGET_TASKS = [
 
 
 def call_model(system_prompt, user_prompt):
-    """Função auxiliar para chamar a OpenRouter"""
+    """Auxiliary function to call OpenRouter"""
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": TEST_MODEL,
@@ -40,54 +40,54 @@ def call_model(system_prompt, user_prompt):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        "temperature": 0.3  # Baixo para raciocínio
+        "temperature": 0.3  # Low for reasoning
     }
 
     try:
         response = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=60)
         data = response.json()
 
-        # VERIFICA SE DEU ERRO NA API (ex: sem créditos, rate limit, etc)
+        # CHECK IF THERE WAS AN API ERROR (e.g., no credits, rate limit, etc.)
         if "error" in data:
-            return f"❌ ERRO DA OPENROUTER:\n{data['error']}"
+            return f"❌ OPENROUTER ERROR:\n{data['error']}"
 
-        # Verifica se 'choices' realmente existe antes de acessar
+        # Check if 'choices' actually exists before accessing
         if "choices" in data and len(data["choices"]) > 0:
             return data["choices"][0]["message"]["content"]
         else:
-            return f"❌ Resposta inesperada da API: {data}"
+            return f"❌ Unexpected API response: {data}"
 
     except Exception as e:
-        return f"❌ Erro na requisição: {str(e)}"
+        return f"❌ Request error: {str(e)}"
 
 
 def main():
-    if API_KEY == "COLE_SUA_CHAVE_OPENROUTER_AQUI" or not API_KEY:
-        print("❌ ERRO: Configure sua OPENROUTER_API_KEY.")
+    if API_KEY == "PASTE_YOUR_OPENROUTER_KEY_HERE" or not API_KEY:
+        print("❌ ERROR: Configure your OPENROUTER_API_KEY.")
         return
 
-    print("🧪 Iniciando Teste de Inferência do MemCollab...")
-    print(f"🤖 Modelo de Teste: {TEST_MODEL}\n")
+    print("🧪 Starting MemCollab Inference Test...")
+    print(f"🤖 Test Model: {TEST_MODEL}\n")
 
     for task in TARGET_TASKS:
         print("=" * 60)
-        print(f"🎯 TAREFA: {task['name']}")
-        print(f"📝 Pergunta: {task['query']}\n")
+        print(f"🎯 TASK: {task['name']}")
+        print(f"📝 Question: {task['query']}\n")
 
         # ---------------------------------------------------------
-        # PASSO 1: TESTE SEM A SKILL (Vanilla Baseline)
+        # STEP 1: TEST WITHOUT SKILL (Vanilla Baseline)
         # ---------------------------------------------------------
-        print("▶️ TESTE 1: Modelo SEM a Skill (Vanilla)...")
+        print("▶️ TEST 1: Model WITHOUT Skill (Vanilla)...")
         vanilla_answer = call_model(
             "You are a helpful AI solving problems.",
             task['query']
         )
-        print(f"❌ Resposta (Vanilla):\n{vanilla_answer[:300]}...\n")
+        print(f"❌ Answer (Vanilla):\n{vanilla_answer[:300]}...\n")
 
         # ---------------------------------------------------------
-        # PASSO 2: BUSCAR A SKILL NO SEU BACKEND
+        # STEP 2: SEARCH FOR SKILL IN YOUR BACKEND
         # ---------------------------------------------------------
-        print("🔍 Buscando Skill Relevante no SkillCrafter (/api/retrieve)...")
+        print("🔍 Searching for Relevant Skill in SkillCrafter (/api/retrieve)...")
         retrieve_resp = requests.post(RETRIEVE_URL, json={
             "query": task['query'],
             "api_key": API_KEY,
@@ -95,35 +95,35 @@ def main():
         }).json()
 
         if not retrieve_resp.get("results"):
-            print("⚠️ Nenhuma skill encontrada. Rode o benchmark antes!")
+            print("⚠️ No skill found. Run the benchmark first!")
             continue
 
         best_skill = retrieve_resp["results"][0]["meta"]
         skill_json = best_skill.get("skill", {})
 
-        # Formatando as constraints para colocar no prompt
+        # Formatting constraints to put in the prompt
         constraints = "\n".join([f"- {c}" for c in retrieve_resp["results"][0]["meta"].get("constraints", [])])
-        if not constraints:  # Fallback caso a estrutura esteja no dict interno
+        if not constraints:  # Fallback if the structure is in the internal dict
             try:
                 import json
                 with open(f"skills_output/{best_skill['filename']}", "r") as f:
                     content = f.read()
-                    constraints = "Use as constraints estruturais descritas no modelo."
+                    constraints = "Use the structural constraints described in the model."
             except:
                 pass
 
-        print(f"✅ Skill Encontrada: {best_skill['title']} (Score: {retrieve_resp['results'][0]['score']})")
+        print(f"✅ Skill Found: {best_skill['title']} (Score: {retrieve_resp['results'][0]['score']})")
 
         # ---------------------------------------------------------
-        # PASSO 3: TESTE COM A SKILL (MemCollab Augmented)
+        # STEP 3: TEST WITH SKILL (MemCollab Augmented)
         # ---------------------------------------------------------
-        print("\n▶️ TESTE 2: Modelo COM a Skill (Augmented)...")
+        print("\n▶️ TEST 2: Model WITH Skill (Augmented)...")
         system_with_skill = f"""You are a reasoning agent. 
 You must follow these retrieved reasoning rules to avoid common pitfalls:
 {retrieve_resp['results'][0]['content']}
 """
         augmented_answer = call_model(system_with_skill, task['query'])
-        print(f"✅ Resposta (Augmented):\n{augmented_answer[:500]}...\n")
+        print(f"✅ Answer (Augmented):\n{augmented_answer[:500]}...\n")
 
 
 if __name__ == "__main__":

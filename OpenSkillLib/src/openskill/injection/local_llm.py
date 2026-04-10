@@ -1,22 +1,22 @@
 """
 local_llm.py — LocalSkillInjectedLLM (Gap 3: cross-attention injection)
 =========================================================================
-Modos de geração disponíveis:
-  verbalization   → extrai constraints do Markdown, injeta como texto (estável)
-  prefix          → injeta skills como prefix tokens (Gap 2, usa projector)
-  cross_attention → injeta K_graph/V_graph nas camadas profundas (Gap 3)
-  auto            → escolhe o melhor modo disponível automaticamente
+Available generation modes:
+  verbalization   → extracts Markdown constraints, injects as text (stable)
+  prefix          → injects skills as prefix tokens (Gap 2, uses projector)
+  cross_attention → injects K_graph/V_graph into deep layers (Gap 3)
+  auto            → automatically chooses the best available mode
 
-Hierarquia de auto:
-  cross_attention (se injector treinado)
-  → prefix (se projector treinado)
-  → verbalization (sempre disponível)
+Auto hierarchy:
+  cross_attention (if injector trained)
+  → prefix (if projector trained)
+  → verbalization (always available)
 
-Novidades nesta versão:
-  - Carrega CrossAttentionInjector de cross_attn_injector.safetensors
-  - _generate_cross_attention(): instala hooks, gera, limpa contexto
-  - mode="cross_attention" disponível no CLI e na API
-  - auto detecta o melhor modo sem configuração manual
+New in this version:
+  - Loads CrossAttentionInjector from cross_attn_injector.safetensors
+  - _generate_cross_attention(): installs hooks, generates, clears context
+  - mode="cross_attention" available in CLI and API
+  - auto detects the best mode without manual configuration
 """
 
 from __future__ import annotations
@@ -103,7 +103,7 @@ class LocalSkillInjectedLLM(BaseLLMProvider):
         return proj
 
     def _load_cross_attn_injector(self):
-        """Carrega ou cria o CrossAttentionInjector e instala os hooks."""
+        """Loads or creates the CrossAttentionInjector and installs the hooks."""
         from openskill.injection.cross_attention import (
             CrossAttentionInjector, detect_qwen_params
         )
@@ -133,7 +133,7 @@ class LocalSkillInjectedLLM(BaseLLMProvider):
             except Exception as e:
                 log.warning("local_llm.cross_attn_load_failed", error=str(e))
 
-        # Injector não treinado: gates=0 → efeito nulo, mas já com hooks
+        # Untrained injector: gates=0 → null effect, but hooks already in place
         inj = CrossAttentionInjector(
             embed_dim=384,
             hidden_size=params["hidden_size"],
@@ -153,7 +153,7 @@ class LocalSkillInjectedLLM(BaseLLMProvider):
     def model_id(self) -> str:
         return self._model_id
 
-    # ── Decisor de pipeline ───────────────────────────────────────────────────
+    # ── Pipeline Decision Maker ───────────────────────────────────────────────────
 
     async def generate_with_guidance(
         self,
@@ -187,7 +187,7 @@ class LocalSkillInjectedLLM(BaseLLMProvider):
 
         return await self.generate([LLMMessage(role="user", content=query)])
 
-    # ── Modo 1: Verbalization ─────────────────────────────────────────────────
+    # ── Mode 1: Verbalization ─────────────────────────────────────────────────
 
     async def _generate_verbalized_strict(
         self, query: str, guidance: RetrievalGuidance, max_tokens: int
@@ -227,7 +227,7 @@ class LocalSkillInjectedLLM(BaseLLMProvider):
             raw={"mode": "verbalization", "confidence": guidance.confidence},
         )
 
-    # ── Modo 2: Prefix injection (Gap 2) ─────────────────────────────────────
+    # ── Mode 2: Prefix injection (Gap 2) ─────────────────────────────────────
 
     async def _generate_prefix(
         self, query: str, guidance: RetrievalGuidance, max_tokens: int
@@ -260,19 +260,19 @@ class LocalSkillInjectedLLM(BaseLLMProvider):
                  "n_skills": len(guidance.skill_vectors)},
         )
 
-    # ── Modo 3: Cross-attention injection (Gap 3) ─────────────────────────────
+    # ── Mode 3: Cross-attention injection (Gap 3) ─────────────────────────────
 
     async def _generate_cross_attention(
         self, query: str, guidance: RetrievalGuidance, max_tokens: int
     ) -> LLMResponse:
         """
-        Eq 6: K_graph e V_graph injetados nas últimas N camadas via forward hooks.
+        Eq 6: K_graph and V_graph injected into the last N layers via forward hooks.
 
-        Fluxo:
-          1. set_skill_context() pré-computa K_graph, V_graph escalados por alpha_p
-          2. model.generate() — hooks interceptam output de cada camada alvo:
+        Flow:
+          1. set_skill_context() precomputes K_graph, V_graph scaled by alpha_p
+          2. model.generate() — hooks intercept output from each target layer:
              hidden += tanh(gate) * Attn(Q, K_graph, V_graph)
-          3. clear_context() — limpa para não vazar para próxima geração
+          3. clear_context() — cleans up so as not to leak into next generation
         """
         inj = self.cross_attn_injector
 
@@ -322,7 +322,7 @@ class LocalSkillInjectedLLM(BaseLLMProvider):
             },
         )
 
-    # ── Genérico e embed ──────────────────────────────────────────────────────
+    # ── Generic and embed ──────────────────────────────────────────────────────
 
     async def generate(self, messages: list[LLMMessage], **kwargs) -> LLMResponse:
         prompt = self.tokenizer.apply_chat_template(

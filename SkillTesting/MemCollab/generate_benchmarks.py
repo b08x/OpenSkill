@@ -3,19 +3,19 @@ import time
 import requests
 
 # ==========================================
-# CONFIGURAÇÕES
+# CONFIGURATIONS
 # ==========================================
 API_URL = os.getenv("CRAFT_API_URL", "http://localhost:8000/api/craft")
 
-# Pegue a chave do ambiente ou cole diretamente aqui
+# Get key from environment or paste it directly here
 API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
-# Recomendação: 8B para errar (Weak) e R1/Minimax para acertar (Strong)
+# Recommendation: 8B to fail (Weak) and R1/Minimax to succeed (Strong)
 WEAK_MODEL = "meta-llama/llama-3.1-8b-instruct"
 STRONG_MODEL = "anthropic/claude-sonnet-4.6"
 
 # ==========================================
-# LISTA DE TAREFAS (BENCHMARKS)
+# BENCHMARK TASKS LIST
 # ==========================================
 BENCHMARK_TASKS = [
     {
@@ -46,19 +46,19 @@ BENCHMARK_TASKS = [
 
 
 def main():
-    if API_KEY == "COLE_SUA_CHAVE_OPENROUTER_AQUI" or not API_KEY:
-        print("❌ ERRO: Por favor, configure sua OPENROUTER_API_KEY no script ou nas variáveis de ambiente.")
+    if API_KEY == "PASTE_YOUR_OPENROUTER_KEY_HERE" or not API_KEY:
+        print("❌ ERROR: Please configure your OPENROUTER_API_KEY in the script or environment variables.")
         return
 
-    print("🚀 Iniciando geração em massa de Skills (Benchmark MemCollab)...")
-    print(f"🔗 URL Alvo: {API_URL}")
+    print("🚀 Starting mass skill generation (MemCollab Benchmark)...")
+    print(f"🔗 Target URL: {API_URL}")
     print(f"🤖 Weak Model:  {WEAK_MODEL}")
     print(f"🧠 Strong Model: {STRONG_MODEL}")
-    print(f"📦 Total de Tarefas: {len(BENCHMARK_TASKS)}\n")
+    print(f"📦 Total Tasks: {len(BENCHMARK_TASKS)}\n")
 
     for index, item in enumerate(BENCHMARK_TASKS, start=1):
         print("-" * 50)
-        print(f"⏳ Processando [{index}/{len(BENCHMARK_TASKS)}]: {item['title']}")
+        print(f"⏳ Processing [{index}/{len(BENCHMARK_TASKS)}]: {item['title']}")
 
         payload = {
             "task": item["task"],
@@ -70,43 +70,43 @@ def main():
         start_time = time.time()
 
         try:
-            # Note: O timeout é longo pois modelos de raciocínio podem demorar até 2 minutos
+            # Note: The timeout is long because reasoning models can take up to 2 minutes
             response = requests.post(API_URL, json=payload, timeout=240)
             elapsed_time = time.time() - start_time
 
             if response.status_code == 200:
                 data = response.json()
-                print(f"✅ Sucesso! (Tempo: {elapsed_time:.1f}s)")
-                print(f"   🏷️  Título da Skill: {data.get('title')}")
-                print(f"   📁 Categoria: {data.get('category')} > {data.get('subcategory')}")
-                print(f"   📄 Arquivo salvo: {data.get('filename')}")
+                print(f"✅ Success! (Time: {elapsed_time:.1f}s)")
+                print(f"   🏷️  Skill Title: {data.get('title')}")
+                print(f"   📁 Category: {data.get('category')} > {data.get('subcategory')}")
+                print(f"   📄 File saved: {data.get('filename')}")
             else:
-                print(f"❌ Falha no Backend (Tempo: {elapsed_time:.1f}s)")
+                print(f"❌ Backend Failure (Time: {elapsed_time:.1f}s)")
                 print(f"   Status Code: {response.status_code}")
-                print(f"   Erro: {response.text}")
+                print(f"   Error: {response.text}")
 
         except requests.exceptions.ConnectionError:
-            print("❌ ERRO: Não foi possível conectar ao backend. O 'main.py' está rodando na porta 8000?")
+            print("❌ ERROR: Could not connect to backend. Is 'main.py' running on port 8000?")
             break
         except requests.exceptions.Timeout:
-            print("❌ ERRO: Timeout. A requisição demorou mais de 4 minutos.")
+            print("❌ ERROR: Timeout. The request took longer than 4 minutes.")
         except Exception as e:
-            print(f"❌ ERRO Inesperado: {str(e)}")
+            print(f"❌ Unexpected ERROR: {str(e)}")
 
-        # Pausa de 5 segundos entre as requisições para evitar rate limit na OpenRouter
+        # 5-second pause between requests to avoid rate limit on OpenRouter
         if index < len(BENCHMARK_TASKS):
-            print("⏳ Pausando 5 segundos antes da próxima requisição...")
+            print("⏳ Pausing 5 seconds before next request...")
             time.sleep(5)
 
-    print("\n🎉 Processo de Benchmark finalizado! Verifique sua pasta 'skills_output'.")
+    print("\n🎉 Benchmark process finished! Check your 'skills_output' folder.")
 
 
 if __name__ == "__main__":
-    # Garante que a biblioteca requests esteja instalada
+    # Ensure requests library is installed
     try:
         import requests
     except ImportError:
-        print("A biblioteca 'requests' não está instalada. Execute: pip install requests")
+        print("The 'requests' library is not installed. Run: pip install requests")
         exit(1)
 
     main()

@@ -705,41 +705,23 @@
 
 
   <div class="card mt-4">
-
     <div class="card-header bg-success text-white">
-
-        🔍 Consultar Memória (Task-Aware Retrieval)
-
+        🔍 Consult Memory (Task-Aware Retrieval)
     </div>
-
     <div class="card-body">
-
-        <label>Qual problema você quer resolver agora?</label>
-
-        <textarea id="retrieveTask" class="form-control mb-2" rows="3" placeholder="Ex: Preciso criar um algoritmo de ordenação em Python..."></textarea>
-
-        <button id="btnRetrieve" class="btn btn-success">Buscar Skills Relevantes</button>
-
-
+        <label>What problem do you want to solve now?</label>
+        <textarea id="retrieveTask" class="form-control mb-2" rows="3" placeholder="Ex: I need to create a sorting algorithm in Python..."></textarea>
+        <button id="btnRetrieve" class="btn btn-success">Search Relevant Skills</button>
 
         <div id="retrieveResult" class="mt-3" style="display:none;">
-
-            <h5>Classificação Identificada:</h5>
-
+            <h5>Identified Classification:</h5>
             <span id="badgeCat" class="badge bg-primary"></span>
-
             <span id="badgeSub" class="badge bg-secondary"></span>
 
-
-
-            <h5 class="mt-3">Skills Recomendadas:</h5>
-
+            <h5 class="mt-3">Recommended Skills:</h5>
             <div id="recommendedSkills" class="list-group"></div>
-
         </div>
-
     </div>
-
 </div>
 </main>
 <script>
@@ -749,12 +731,12 @@ document.getElementById('btnRetrieve').addEventListener('click', async () => {
     const apiKey = document.getElementById('apiKey').value;
 
     if(!query || !apiKey) {
-        showError("Preencha a tarefa e a API Key para a busca.");
+        showError("Please fill in the task and the API Key for the search.");
         return;
     }
 
     const btn = document.getElementById('btnRetrieve');
-    btn.innerHTML = '<span class="spinner">⟳</span> Navegando no Grafo (Neural-Socratic)...';
+    btn.innerHTML = '<span class="spinner">⟳</span> Navigating the Graph (Neural-Socratic)...';
     btn.disabled = true;
 
     try {
@@ -764,7 +746,7 @@ document.getElementById('btnRetrieve').addEventListener('click', async () => {
             body: JSON.stringify({
                 query: query,
                 api_key: apiKey,
-                use_graph: true // Ativa S-Path-RAG e TurboQuant
+                use_graph: true // Enables S-Path-RAG and TurboQuant
             })
         });
 
@@ -772,10 +754,10 @@ document.getElementById('btnRetrieve').addEventListener('click', async () => {
 
         document.getElementById('retrieveResult').style.display = 'block';
 
-        // Se for o modo legado (sem grafo)
+        // If legacy mode (no graph)
         if (data.mode === 'category') {
-            document.getElementById('badgeCat').innerText = data.classification.category || "Geral";
-            document.getElementById('badgeSub').innerText = data.classification.subcategory || "Geral";
+            document.getElementById('badgeCat').innerText = data.classification.category || "General";
+            document.getElementById('badgeSub').innerText = data.classification.subcategory || "General";
         } else {
             // S-PATH-RAG UI
             document.getElementById('badgeCat').innerText = "Graph Path Found";
@@ -786,11 +768,11 @@ document.getElementById('btnRetrieve').addEventListener('click', async () => {
         const list = document.getElementById('recommendedSkills');
         list.innerHTML = '';
 
-        if(data.mode === 'graph') {
+        if(data.mode === 'graph_soft_injection') {
 
         list.innerHTML += `
     <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid var(--success); padding: 15px; border-radius: 8px; margin-top: 15px;">
-        <h5 style="color: var(--success); margin-bottom: 10px;">🤖 Resposta Gerada (Soft Latent Injection):</h5>
+        <h5 style="color: var(--success); margin-bottom: 10px;">🤖 Generated Answer (Soft Latent Injection):</h5>
         <div style="font-size: 0.85rem; color: var(--text); white-space: pre-wrap;">
 ${data.final_answer}
         </div>
@@ -798,7 +780,7 @@ ${data.final_answer}
 `;
 
 
-            // Mostra o rastro de raciocínio (Trace Socrático)
+            // Show Socratic reasoning trace
             list.innerHTML += `
                 <div style="background: var(--surface2); padding: 12px; border-left: 3px solid var(--accent); margin-bottom: 15px; font-size: 0.75rem; color: var(--muted); white-space: pre-wrap;">
 <strong>Neural-Socratic Reasoning Trace:</strong>
@@ -806,7 +788,7 @@ ${data.reasoning_trace}
                 </div>
             `;
 
-            // Mostra o caminho de skills
+            // Show skill path
             if (data.skills && data.skills.length > 0) {
                 let pathHtml = `<div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px; overflow-x: auto;">`;
                 data.skills.forEach((skill, index) => {
@@ -822,42 +804,42 @@ ${data.reasoning_trace}
                 pathHtml += `</div>`;
                 list.innerHTML += pathHtml;
 
-                // Mostra as skills detalhadas para download
+                // Show detailed skills for download
                 data.skills.forEach(skill => {
                     list.innerHTML += `
                         <div class="list-group-item" style="background: var(--surface); border: 1px solid var(--border); margin-bottom: 8px; border-radius: 6px; padding: 12px;">
                             <strong style="color: var(--text);">${skill.title}</strong><br>
                             <small style="color: var(--muted);">${skill.domain}</small><br>
-                            <a href="/api/skills/${skill.id}/download" class="mini-btn dl mt-2" download="Skills.md">↓ Baixar Skill.md</a>
+                            <a href="/api/skills/${skill.id}/download" class="mini-btn dl mt-2" download="Skills.md">↓ Download Skill.md</a>
                         </div>
                     `;
                 });
             } else {
-                list.innerHTML += '<div class="alert alert-warning">Nenhum caminho semântico encontrado no grafo. Crie mais skills!</div>';
+                list.innerHTML += '<div class="alert alert-warning">No semantic path found in the graph. Create more skills!</div>';
             }
         }
     } catch(err) {
-        showError("Erro na busca geométrica: " + err);
+        showError("Geometric search error: " + err);
     }
 
-    btn.innerText = "Buscar Skills Relevantes";
+    btn.innerText = "Search Relevant Skills";
     btn.disabled = false;
 });
 
-// ── Trace2Skill Evolution (Adicione isso na renderização dos cards) ──
+// ── Trace2Skill Evolution ──
 async function evolveSkill(skillId) {
     const apiKey = document.getElementById('apiKey').value;
     if(!apiKey) {
-        showError("Preencha a API Key no topo para evoluir a skill.");
+        showError("Please fill in the API Key at the top to evolve the skill.");
         return;
     }
 
-    const tasksStr = prompt("Para evoluir a skill, digite 2 ou mais tarefas separadas por vírgula (O sistema rodará os agentes nestas tarefas para encontrar novos padrões):", "Ex: Criar um algoritmo de Dijkstra, Otimizar uma árvore AVL");
+    const tasksStr = prompt("To evolve the skill, enter 2 or more tasks separated by commas (The system will run agents on these tasks to find new patterns):", "Ex: Create Dijkstra algorithm, Optimize an AVL tree");
     if (!tasksStr) return;
 
     const tasks = tasksStr.split(',').map(t => t.trim()).filter(t => t);
 
-    alert("Iniciando Evolução em Frota (Trace2Skill). Isso levará um tempo. Olhe o console ou aguarde o alerta de sucesso.");
+    alert("Starting Fleet Evolution (Trace2Skill). This will take some time. Check the console or wait for the success alert.");
 
     try {
         const res = await fetch(`/api/evolve/${skillId}`, {
@@ -871,13 +853,13 @@ async function evolveSkill(skillId) {
 
         const data = await res.json();
         if(res.ok) {
-            alert(`🎉 Skill Evoluída com Sucesso!\n\nPatches aplicados: ${data.patch_count}\nTamanho da frota: ${data.fleet_size}\nTaxa de sucesso nas tarefas: ${(data.success_rate*100).toFixed(0)}%`);
-            loadSkillList(); // Recarrega a UI
+            alert(`🎉 Skill Evolved Successfully!\n\nPatches applied: ${data.patch_count}\nFleet size: ${data.fleet_size}\nTask success rate: ${(data.success_rate*100).toFixed(0)}%`);
+            loadSkillList(); // Reload UI
         } else {
-            alert("Erro na evolução: " + data.detail);
+            alert("Evolution error: " + data.detail);
         }
     } catch (err) {
-        alert("Erro fatal: " + err);
+        alert("Fatal error: " + err);
     }
 }
 
@@ -1040,7 +1022,7 @@ async function loadSkillList() {
         </div>
        <div class="skill-card-actions">
     <a href="/api/skills/${s.id}/download" class="mini-btn dl" download="Skills.md">↓ Download</a>
-    <button onclick="evolveSkill('${s.id}')" class="mini-btn" style="border-color: var(--accent3); color: var(--accent3);">⚡ Evoluir (Trace2Skill)</button>
+    <button onclick="evolveSkill('${s.id}')" class="mini-btn" style="border-color: var(--accent3); color: var(--accent3);">⚡ Evolve (Trace2Skill)</button>
 </div>
       </div>
     `).join('');

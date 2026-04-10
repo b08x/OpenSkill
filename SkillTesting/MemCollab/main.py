@@ -62,20 +62,20 @@ class RetrieveRequest(BaseModel):
 # ──────────────────────────────────────────────
 def strip_reasoning_tags(text: str) -> str:
     """
-    Remove tags de raciocínio (<think>...</think> ou <thought>...</thought>)
-    deixando apenas a resposta final do modelo. Ideal para limpar saídas JSON ou listas.
+    Removes reasoning tags (<think>...</think> or <thought>...</thought>)
+    leaving only the final response. Ideal for cleaning JSON or list outputs.
     """
-    # re.DOTALL permite que o '.' dê match em quebras de linha
-    # A não-ganância (.*?) combinada com a borda (</think> ou fim do texto $) garante
-    # que limparemos o bloco mesmo se o modelo estourar o limite de tokens e não fechar a tag.
+    # re.DOTALL allows '.' to match newlines
+    # Non-greedy (.*?) combined with boundary (</think> or end of text $) ensures
+    # we clean the block even if model exceeds token limit and doesn't close the tag.
     cleaned = re.sub(r'<(?:think|thought)>.*?(?:</(?:think|thought)>|$)', '', text, flags=re.DOTALL | re.IGNORECASE)
     return cleaned.strip()
 
 
 async def classify_task(api_key: str, model: str, task: str) -> dict:
     """
-    Classifica a tarefa em Categoria e Subcategoria para o Task-Aware Retrieval.
-    Inspirado na Tabela 7 do artigo MemCollab.
+    Classifies the task into Category and Subcategory for Task-Aware Retrieval.
+    Inspired by Table 7 of the MemCollab paper.
     """
     system = (
         "You are an expert Task Classifier for an AI Memory System.\n"
@@ -128,7 +128,7 @@ async def call_llm(api_key: str, model: str, messages: list, max_tokens: int = 2
         "temperature": 0.7,
     }
 
-    # Timeout aumentado para 180s pois Reasoning Models demoram muito
+    # Timeout increased to 180s as Reasoning Models take a long time
     async with httpx.AsyncClient(timeout=180.0) as client:
         resp = await client.post(OPENROUTER_URL, headers=headers, json=payload)
         if resp.status_code != 200:
@@ -140,7 +140,7 @@ async def call_llm(api_key: str, model: str, messages: list, max_tokens: int = 2
             raise HTTPException(status_code=502, detail=f"OpenRouter returned no choices. Response: {data}")
         message = choices[0].get("message") or {}
 
-        # 1. Extração robusta do "content" (pode ser string ou uma lista em multimodelos)
+        # 1. Robust extraction of "content" (can be string or a list in multi-modal models)
         content_obj = message.get("content")
         content = ""
         if isinstance(content_obj, str):
@@ -150,21 +150,21 @@ async def call_llm(api_key: str, model: str, messages: list, max_tokens: int = 2
                 if isinstance(item, dict) and item.get("type") == "text":
                     content += item.get("text", "")
 
-        # 2. Extração de Reasoning nativo da OpenRouter (se aplicável)
+        # 2. Extraction of native reasoning from OpenRouter (if applicable)
         reasoning = message.get("reasoning") or ""
         if not reasoning and message.get("reasoning_details"):
             for detail in message["reasoning_details"]:
                 if isinstance(detail, dict) and detail.get("text"):
                     reasoning += detail["text"]
 
-        # 3. Unifica e força o padrão <think> para fácil tratamento no resto do código
+        # 3. Unify and force <think> pattern for easy handling in rest of code
         text = ""
         if reasoning:
             text += f"<think>\n{reasoning}\n</think>\n\n"
         if content:
             text += content
 
-        # 4. Fallbacks (modelos antigos, streaming edge cases)
+        # 4. Fallbacks (old models, streaming edge cases)
         if not text.strip():
             text = message.get("text") or (message.get("delta") or {}).get("content") or ""
 
@@ -187,7 +187,7 @@ async def generate_trajectory(api_key: str, model: str, task: str) -> str:
         )},
         {"role": "user", "content": f"Task:\n{task}"}
     ]
-    # Retorna o output puro (incluindo o reasoning nativo) para ser avaliado depois
+    # Returns raw output (including native reasoning) to be evaluated later
     return await call_llm(api_key, model, messages, max_tokens=3000)
 
 
@@ -217,7 +217,7 @@ async def contrastive_analysis(api_key: str, model: str, task: str,
         {"role": "user", "content": user}
     ], max_tokens=2000)
 
-    # Remove as tags <think> do modelo avaliador para que retorne puramente a lista.
+    # Remove <think> tags from evaluator model so it returns purely the list.
     return strip_reasoning_tags(raw_result)
 
 
@@ -250,27 +250,27 @@ async def synthesize_skill(api_key: str, model: str, task: str,
         {"role": "user", "content": user}
     ], max_tokens=2500)
 
-    # Passo 1: Limpar os pensamentos (Reasoning Tags)
+    # Step 1: Clean thoughts (Reasoning Tags)
     clean_text = strip_reasoning_tags(raw)
 
-    # Passo 2: Extração robusta do JSON via Regex
+    # Step 2: Robust JSON extraction via Regex
     try:
-        # A. Tenta achar bloco Markdown com JSON (funciona mesmo com texto antes/depois)
+        # A. Try to find Markdown block with JSON (works even with text before/after)
         md_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', clean_text, re.DOTALL | re.IGNORECASE)
         if md_match:
             return json.loads(md_match.group(1))
 
-        # B. Se não houver Markdown, tenta encontrar a chave principal externa { ... }
+        # B. If no Markdown, try to find the main outer key { ... }
         bracket_match = re.search(r'(\{.*\})', clean_text, re.DOTALL)
         if bracket_match:
             return json.loads(bracket_match.group(1))
 
-        # C. Última tentativa: dar load direto na string tratada
+        # C. Last attempt: direct load on cleaned string
         return json.loads(clean_text)
 
     except Exception as e:
-        print(f"Synthesize fallback acionado! Erro de parsing: {e}")
-        # Retorna estrutura de segurança preenchida se falhar de verdade
+        print(f"Synthesize fallback triggered! Parsing error: {e}")
+        # Return populated security structure if it truly fails
         return {
             "title": "Skill Extraction Error",
             "domain": "General",
@@ -414,13 +414,13 @@ async def craft_skill(req: CraftRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Skill synthesis failed: {str(e)}")
 
-    # --- NOVO: Classificar a Tarefa (AGORA NO LUGAR CERTO) ---
+    # --- NEW: Classify Task (NOW IN RIGHT PLACE) ---
     try:
         classification = await classify_task(req.api_key, strong, req.task)
     except Exception:
         classification = {"category": "General", "subcategory": "General"}
 
-    # Como skill_data já foi criado no Step 3, agora podemos injetar a categoria nele!
+    # Since skill_data was already created in Step 3, we can now inject category into it!
     skill_data["category"] = classification.get("category", "General")
     skill_data["subcategory"] = classification.get("subcategory", "General")
 
@@ -484,16 +484,16 @@ async def list_skills():
 @app.post("/api/retrieve")
 async def retrieve_skills(req: RetrieveRequest):
     """
-    Task-Aware Retrieval: Classifica a pergunta e busca as Skills compatíveis.
+    Task-Aware Retrieval: Classifies question and searches for compatible Skills.
     """
     model = req.model or STRONG_MODEL
 
-    # 1. Classifica a pergunta do usuário
+    # 1. Classifies user question
     classification = await classify_task(req.api_key, model, req.query)
     target_cat = classification.get("category", "")
     target_sub = classification.get("subcategory", "")
 
-    # 2. Varre as skills salvas e calcula um "score" de relevância
+    # 2. Scans saved skills and calculates a relevance score
     scored_skills = []
     for meta_file in SKILLS_DIR.glob("*.json"):
         try:
@@ -505,7 +505,7 @@ async def retrieve_skills(req: RetrieveRequest):
                 score += 3
 
             if score > 0:
-                # Carrega o MD para enviar junto
+                # Loads MD to send along
                 md_path = SKILLS_DIR / meta["filename"]
                 content = md_path.read_text(encoding="utf-8") if md_path.exists() else ""
                 scored_skills.append({
@@ -516,7 +516,7 @@ async def retrieve_skills(req: RetrieveRequest):
         except Exception:
             continue
 
-    # 3. Ordena pelas mais relevantes e retorna o Top K
+    # 3. Sorts by most relevant and returns Top K
     scored_skills.sort(key=lambda x: x["score"], reverse=True)
     top_skills = scored_skills[:req.top_k]
 

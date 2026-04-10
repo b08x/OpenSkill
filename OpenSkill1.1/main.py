@@ -611,28 +611,28 @@ async def retrieve_skills(req: RetrieveRequest):
         except Exception as e:
             raise HTTPException(500, f"Graph retrieval failed: {e}")
 
-        # === A MÁGICA DA INJEÇÃO VETORIAL (SOFT LATENTS) ===
+        # === THE MAGIC OF VECTOR INJECTION (SOFT LATENTS) ===
         skill_vectors = []
         enriched_skills = []
 
         for skill_meta in result.get("skills", []):
             sid = skill_meta.get("id", "")
 
-            # Pega o vetor quantizado pelo TurboQuant e De-quantiza
+            # Get the vector quantized by TurboQuant and De-quantize it
             if "qvector" in skill_meta:
                 qvec, res, scale = unpack_quantized(skill_meta["qvector"])
                 dim = skill_meta["qvector"]["dim"]
-                # Reconstrói o vetor original matematicamente (sem usar o texto)
+                # Reconstruct the original vector mathematically (without using text)
                 v_approx = dequantize_vector(qvec, res, scale, dim)
                 skill_vectors.append(v_approx)
 
-            # Apenas para exibição na UI
+            # Only for display in the UI
             filename = skill_meta.get("filename", "")
             content = (SKILLS_DIR / filename).read_text() if filename else ""
             enriched_skills.append({**skill_meta, "content": content})
 
-        # Em vez de mandar as skills como texto no prompt, injetamos os VETORES
-        # diretamente no cérebro do LLM local e pedimos para ele resolver a query.
+        # Instead of sending the skills as text in the prompt, we inject the VECTORS
+        # directly into the local LLM's brain and ask it to solve the query.
         prompt_resolucao = f"Resolve this problem applying the reasoning guidelines encoded in your latent space:\n\n{req.query}"
 
         final_answer = await asyncio.to_thread(
@@ -649,7 +649,7 @@ async def retrieve_skills(req: RetrieveRequest):
             "confidence": result.get("confidence", 0.0),
             "rounds": result.get("rounds", 1),
             "reasoning_trace": result.get("reasoning_trace", ""),
-            "final_answer": final_answer,  # <--- A Resposta Gerada via Geometria!
+            "final_answer": final_answer,  # <--- The Generated Answer via Geometry!
         }
 
     else:

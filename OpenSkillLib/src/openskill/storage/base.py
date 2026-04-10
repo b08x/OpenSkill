@@ -1,11 +1,11 @@
 """
 Storage Abstraction Layer — Adapter Pattern
 ==========================================
-TODOS os adaptadores de armazenamento implementam esta interface.
+ALL storage adapters implement this interface.
 
-Isto é o que torna o OpenSkill um produto Open Core:
-  - LocalDiskStore  → Gratuito, 100% local, roda no laptop do dev
-  - CloudSaaSStore  → Pago,     infraestrutura gerenciada na nuvem
+This is what makes OpenSkill an Open Core product:
+  - LocalDiskStore  → Free, 100% local, runs on dev's laptop
+  - CloudSaaSStore  → Paid, managed cloud infrastructure
 """
 # --- openskill/storage/base.py ---
 
@@ -17,9 +17,9 @@ import json
 from enum import Enum
 
 class SkillType(str, Enum):
-    ACTIVE = "active"     # Requer invocação de código (EvoSkills Python Scripts)
-    PASSIVE = "passive"   # Requer apenas injeção no espaço latente (S-Path RAG Cross-Attention)
-    HYBRID = "hybrid"     # Possui regras semânticas fortes E scripts utilitários
+    ACTIVE = "active"     # Requires code invocation (EvoSkills Python Scripts)
+    PASSIVE = "passive"   # Requires only latent space injection (S-Path RAG Cross-Attention)
+    HYBRID = "hybrid"     # Has strong semantic rules AND utility scripts
 
 @dataclass
 class SkillVectorProfile:
@@ -39,7 +39,7 @@ class SkillVectorProfile:
 
 @dataclass
 class SkillMetadata:
-    # Campos obrigatórios com fallback default para não quebrar no 'from_dict'
+    # Required fields with default fallback to not break 'from_dict'
     id: str = ""
     title: str = "Untitled"
     skill_type: SkillType = SkillType.PASSIVE
@@ -48,11 +48,11 @@ class SkillMetadata:
     subcategory: str = "General"
 
     # --- (Game Mechanics) ---
-    level: int = 1  # Sobe a cada co-evolução (EvoSkills)
-    xp: float = 0.0  # Acumula baseado na taxa de sucesso em produção
+    level: int = 1  # Increases with each co-evolution (EvoSkills)
+    xp: float = 0.0  # Accumulates based on production success rate
     last_success_rate: Optional[float] = None
-    evolution_count: int = 0  # Quantas vezes o Trace2Skill fez "respec" ou patch
-    mana_cost: int = 0  # Estimativa de tokens (Custo para a Hotbar)
+    evolution_count: int = 0  # How many times Trace2Skill did a "respec" or patch
+    mana_cost: int = 0  # Token estimate (Hotbar cost)
 
     task: str = ""
     filename: str = ""
@@ -69,7 +69,7 @@ class SkillMetadata:
 
     def to_dict(self) -> dict:
         d = dataclass_asdict_filter_none(self)
-        d['skill_type'] = self.skill_type.value  # Serializa o Enum
+        d['skill_type'] = self.skill_type.value  # Serializes Enum
         if self.vectors:
             d["vectors"] = {k: v.to_dict() if hasattr(v, 'to_dict') else v for k, v in self.vectors.items()}
         return d
@@ -79,13 +79,13 @@ class SkillMetadata:
         import dataclasses
         valid_fields = {f.name for f in dataclasses.fields(cls)}
 
-        # Converte o dicionário de vetores com segurança
+        # Safely converts vector dictionary
         vectors_raw = d.get("vectors", {})
         vectors = {}
         if isinstance(vectors_raw, dict):
             for k, v in vectors_raw.items():
                 if isinstance(v, dict):
-                    # Filtra campos do perfil também
+                    # Filters profile fields as well
                     p_fields = {f.name for f in dataclasses.fields(SkillVectorProfile)}
                     p_data = {pk: pv for pk, pv in v.items() if pk in p_fields}
                     vectors[k] = SkillVectorProfile(**p_data)
@@ -93,7 +93,7 @@ class SkillMetadata:
         if 'skill_type' in d:
             d['skill_type'] = SkillType(d['skill_type'])
 
-        # Filtra campos da skill
+        # Filters skill fields
         filtered = {k: v for k, v in d.items() if k in valid_fields}
         if "vectors" in filtered: del filtered["vectors"]
 
@@ -102,7 +102,7 @@ class SkillMetadata:
 
 @dataclass
 class SkillGraphData:
-    """Grafo de skills (nós + arestas)."""
+    """Skill graph (nodes + edges)."""
     nodes: dict[str, dict] = field(default_factory=dict)
     edges: list[dict] = field(default_factory=list)
 
@@ -119,7 +119,7 @@ def dataclass_asdict_filter_none(obj) -> dict:
     d = {}
     for f in dataclasses.fields(obj):
         val = getattr(obj, f.name)
-        # Se for Ellipsis ou None, ignoramos.
+        # If it's Ellipsis or None, we ignore it.
         if val is not None and val is not Ellipsis:
             d[f.name] = val
     return d
@@ -127,13 +127,13 @@ def dataclass_asdict_filter_none(obj) -> dict:
 
 class BaseSkillStore(ABC):
     """
-    Interface abstrata para armazenamento de skills.
+    Abstract interface for skill storage.
 
-    Implemente esta interface para criar um novo adapter:
-      1. LocalDiskStore    — salva em arquivos .md/.json no disco
-      2. CloudSaaSStore    — chama API REST do SaaS
-      3. RedisStore         — vetores no Redis (exemplo futuro)
-      4. PgVectorStore      — vetores no PostgreSQL + pgvector
+    Implement this interface to create a new adapter:
+      1. LocalDiskStore    — saves to .md/.json files on disk
+      2. CloudSaaSStore    — calls SaaS REST API
+      3. RedisStore         — vectors in Redis (future example)
+      4. PgVectorStore      — vectors in PostgreSQL + pgvector
     """
 
     @abstractmethod
@@ -143,45 +143,45 @@ class BaseSkillStore(ABC):
         markdown: str,
         metadata: SkillMetadata,
     ) -> None:
-        """Salva uma skill (markdown + metadados)."""
+        """Saves a skill (markdown + metadata)."""
         ...
 
     @abstractmethod
     async def get_skill_md(self, skill_id: str) -> Optional[str]:
-        """Retorna o conteúdo Markdown de uma skill."""
+        """Returns the Markdown content of a skill."""
         ...
 
     @abstractmethod
     async def get_skill_meta(self, skill_id: str) -> Optional[SkillMetadata]:
-        """Retorna os metadados de uma skill."""
+        """Returns the metadata of a skill."""
         ...
 
     @property
     def workspace_path(self) -> Optional[Path]:
         """
-        Retorna o caminho local do workspace, se aplicável.
-        Retorna None para armazenamentos em nuvem pura que não suportam cache local de pesos neurais.
+        Returns the local workspace path, if applicable.
+        Returns None for pure cloud storage that doesn't support local neural weight caching.
         """
         return None
 
     @abstractmethod
     async def list_skills(self) -> list[SkillMetadata]:
-        """Lista todas as skills no store."""
+        """Lists all skills in the store."""
         ...
 
     @abstractmethod
     async def delete_skill(self, skill_id: str) -> None:
-        """Remove uma skill do store."""
+        """Removes a skill from the store."""
         ...
 
     @abstractmethod
     def get_graph(self) -> SkillGraphData:
-        """Retorna o grafo de skills."""
+        """Returns the skill graph."""
         ...
 
     @abstractmethod
     async def update_graph(self, graph: SkillGraphData) -> None:
-        """Atualiza o grafo de skills."""
+        """Updates the skill graph."""
         ...
 
     @abstractmethod
@@ -194,7 +194,7 @@ class BaseSkillStore(ABC):
             dimension: int,
             provider: str
     ) -> None:
-        """Salva o vetor quantizado (TurboQuant) de uma skill."""
+        """Saves the quantized vector (TurboQuant) of a skill."""
         ...
 
     # ── Factory ───────────────────────────────────────────────────────────────
@@ -202,9 +202,9 @@ class BaseSkillStore(ABC):
     @classmethod
     def from_uri(cls, uri: str, **kwargs) -> "BaseSkillStore":
         """
-        Factory que retorna o adapter correto baseado na URI.
+        Factory that returns the correct adapter based on URI.
 
-        Exemplos:
+        Examples:
           LocalDiskStore.from_uri("local:./skills")
           CloudSaaSStore.from_uri("cloud://osk_live_xxx?workspace=acme")
           RedisStore.from_uri("redis://localhost:6379/0")

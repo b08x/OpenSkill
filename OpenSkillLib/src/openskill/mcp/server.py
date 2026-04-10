@@ -1,14 +1,14 @@
 """
-MCP Server — Model Context Protocol para IDEs
+MCP Server — Model Context Protocol for IDEs
 ==============================================
-Expoõe o OpenSkill como ferramenta MCP para:
+Exposes OpenSkill as an MCP tool for:
   - Cursor IDE
   - Windsurf (Codeium)
   - Claude Desktop (Anthropic)
-  - Qualquer cliente MCP-compatible
+  - Any MCP-compatible client
 
-Uso no Cursor:
-  1. Adicionar em ~/.cursor/mcp.json:
+Usage in Cursor:
+  1. Add to ~/.cursor/mcp.json:
      {
        "mcpServers": {
          "openskill": {
@@ -18,7 +18,7 @@ Uso no Cursor:
        }
      }
 
-  2. No Cursor, perguntar: "Use the Raft consensus skill to help me
+  2. In Cursor, ask: "Use the Raft consensus skill to help me
      handle a network partition"
 """
 
@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-# MCP SDK — usa a spec oficial da Anthropic
+# MCP SDK — uses official Anthropic spec
 try:
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
@@ -49,7 +49,7 @@ log = structlog.get_logger()
 
 @dataclass
 class MCPServerConfig:
-    """Configuração do servidor MCP."""
+    """MCP server configuration."""
     skill_dir: str = "./skills_output"
     default_weak_model: str = "openai/gpt-4o-mini"
     default_strong_model: str = "anthropic/claude-3-5-sonnet"
@@ -58,39 +58,38 @@ class MCPServerConfig:
 
 @dataclass
 class MCPToolContext:
-    """Contexto compartilhado entre tools MCP."""
+    """Context shared between MCP tools."""
     client: OpenSkillClient
     config: MCPServerConfig
 
 
-# ── Ferramentas disponíveis via MCP ──────────────────────────────────────────
+# ── Available MCP Tools ──────────────────────────────────────────
 
 TOOLS: list[dict] = [
     {
         "name": "openskill_craft",
         "description": (
-            "Cria uma nova skill de raciocínio a partir de um problema. "
-            "Usa análise contrastiva entre um modelo fraco e um forte para "
-            "extrair invariantes, padrões de violação e constraints normativas. "
-            "Retorna uma skill estruturada que pode ser usada para guiar "
-            "futuras gerações."
+            "Creates a new reasoning skill from a problem. "
+            "Uses contrastive analysis between a weak and a strong model to "
+            "extract invariants, violation patterns, and normative constraints. "
+            "Returns a structured skill that can be used to guide future generations."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Descrição do problema ou tarefa",
+                    "description": "Description of the problem or task",
                     "example": "Implement Raft consensus over a high-latency network"
                 },
                 "weak_model": {
                     "type": "string",
-                    "description": "Modelo mais fraco (fallback)",
+                    "description": "Weaker model (fallback)",
                     "default": "openai/gpt-4o-mini"
                 },
                 "strong_model": {
                     "type": "string",
-                    "description": "Modelo mais forte (target)",
+                    "description": "Stronger model (target)",
                     "default": "anthropic/claude-3-5-sonnet"
                 },
             },
@@ -100,28 +99,28 @@ TOOLS: list[dict] = [
     {
         "name": "openskill_retrieve",
         "description": (
-            "Busca skills relevantes para resolver um problema usando "
-            "busca vetorial TurboQuant + grafo semântico S-Path-RAG. "
-            "Retorna constraints normativas e padrões de raciocínio que "
-            "devem ser aplicados ao resolver o problema."
+            "Searches for relevant skills to solve a problem using "
+            "TurboQuant vector search + S-Path-RAG semantic graph. "
+            "Returns normative constraints and reasoning patterns that "
+            "should be applied when solving the problem."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "A pergunta ou problema do usuário",
+                    "description": "The user's question or problem",
                     "example": "How to handle leader election failure in a distributed system?"
                 },
                 "top_k": {
                     "type": "integer",
-                    "description": "Número de skills a retornar",
+                    "description": "Number of skills to return",
                     "default": 3,
                 },
                 "format": {
                     "type": "string",
                     "enum": ["constraints", "full", "summary"],
-                    "description": "Formato do retorno",
+                    "description": "Return format",
                     "default": "constraints",
                 },
             },
@@ -131,25 +130,25 @@ TOOLS: list[dict] = [
     {
         "name": "openskill_evolve",
         "description": (
-            "Evolui uma skill existente a partir de trajetórias de execução. "
-            "Usa Trace2Skill com frota de sub-agentes para propor patches "
-            "que são consolidados hierarquicamente."
+            "Evolves an existing skill from execution trajectories. "
+            "Uses Trace2Skill with a fleet of sub-agents to propose patches "
+            "that are consolidated hierarchically."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "skill_id": {
                     "type": "string",
-                    "description": "ID da skill a evoluir",
+                    "description": "ID of the skill to evolve",
                 },
                 "trajectories": {
                     "type": "array",
-                    "description": "Lista de trajetórias [{task, trajectory, success}]",
+                    "description": "List of trajectories [{task, trajectory, success}]",
                     "items": {"type": "object"},
                 },
                 "tasks": {
                     "type": "array",
-                    "description": "Ou: lista de tarefas para gerar trajetórias automaticamente",
+                    "description": "Or: list of tasks to generate trajectories automatically",
                     "items": {"type": "string"},
                 },
             },
@@ -158,7 +157,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "openskill_list",
-        "description": "Lista todas as skills disponíveis no repositório local.",
+        "description": "Lists all available skills in the local repository.",
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -166,7 +165,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "openskill_graph",
-        "description": "Retorna o grafo de relationships entre skills.",
+        "description": "Returns the relationship graph between skills.",
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -175,14 +174,14 @@ TOOLS: list[dict] = [
 ]
 
 
-# ── Handler das ferramentas ───────────────────────────────────────────────────
+# ── Tool Call Handler ───────────────────────────────────────────────────
 
 async def handle_tool_call(
     ctx: MCPToolContext,
     tool_name: str,
     arguments: dict,
 ) -> TextContent:
-    """Dispatch de chamada de ferramenta MCP."""
+    """MCP tool call dispatch."""
 
     try:
         if tool_name == "openskill_craft":
@@ -199,8 +198,8 @@ async def handle_tool_call(
                     "title": meta.title,
                     "category": f"{meta.category}/{meta.subcategory}",
                     "message": (
-                        f"Skill '{meta.title}' criada com sucesso. "
-                        f"ID: {meta.id}. Use openskill_retrieve para buscar guidance."
+                        f"Skill '{meta.title}' created successfully. "
+                        f"ID: {meta.id}. Use openskill_retrieve to search for guidance."
                     ),
                 }, indent=2),
             )
@@ -225,7 +224,7 @@ async def handle_tool_call(
                 lines = []
                 for i, s in enumerate(skills, 1):
                     md = s.get("content", "")
-                    # Extrai só as constraints do markdown
+                    # Extracts only constraints from markdown
                     lines.append(f"## Skill {i}: {s.get('title', '?')}")
                     if "## Normative Constraints" in md:
                         start = md.index("## Normative Constraints")
@@ -236,7 +235,7 @@ async def handle_tool_call(
 
             return TextContent(
                 type="text",
-                text=output or "Nenhuma skill encontrada para esta query.",
+                text=output or "No skills found for this query.",
             )
 
         elif tool_name == "openskill_evolve":
@@ -296,7 +295,7 @@ async def handle_tool_call(
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def main(config: MCPServerConfig | None = None) -> None:
-    """Roda o servidor MCP via stdio."""
+    """Runs the MCP server via stdio."""
 
     if not MCP_AVAILABLE:
         print(
@@ -310,7 +309,7 @@ async def main(config: MCPServerConfig | None = None) -> None:
 
     cfg = config or MCPServerConfig()
 
-    # Inicializa cliente OpenSkill
+    # Initializes OpenSkill client
     from openskill.llm.openrouter import OpenRouterProvider
     llm = OpenRouterProvider(api_key=cfg.api_key or "") if cfg.api_key else None
     store = LocalDiskStore(cfg.skill_dir)
@@ -319,7 +318,7 @@ async def main(config: MCPServerConfig | None = None) -> None:
     ctx = MCPToolContext(client=client, config=cfg)
     server = Server("openskill")
 
-    # ── Registra capabilities ────────────────────────────────────────────────
+    # ── Register capabilities ────────────────────────────────────────────────
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
@@ -340,7 +339,7 @@ async def main(config: MCPServerConfig | None = None) -> None:
         result = await handle_tool_call(ctx, name, arguments)
         return [result]
 
-    # ── Roda servidor stdio ──────────────────────────────────────────────────
+    # ── Run stdio server ──────────────────────────────────────────────────
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
@@ -352,7 +351,7 @@ async def main(config: MCPServerConfig | None = None) -> None:
 
 
 def run() -> None:
-    """Entry point para: python -m openskill.mcp.server"""
+    """Entry point for: python -m openskill.mcp.server"""
     import sys
     asyncio.run(main())
 

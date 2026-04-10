@@ -11,6 +11,7 @@ services:
       - .:/app
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - HF_TOKEN=${HF_TOKEN}
     restart: unless-stopped
 
   openskill-mcp:
@@ -25,6 +26,7 @@ services:
       - openskill-web
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - HF_TOKEN=${HF_TOKEN}
     restart: unless-stopped
 
   openskill-poc:
@@ -39,6 +41,7 @@ services:
       - ./OpenSkill1.1/templates:/app/OpenSkill1.1/templates
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - HF_TOKEN=${HF_TOKEN}
     deploy:
       resources:
         reservations:
@@ -57,6 +60,7 @@ services:
       - openskill-web
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - HF_TOKEN=${HF_TOKEN}
       - CRAFT_API_URL=http://openskill-web:8000/api/craft
       - RETRIEVE_API_URL=http://openskill-web:8000/api/retrieve
     profiles:

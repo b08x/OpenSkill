@@ -1,23 +1,23 @@
 """
 SkillCrafter — MemCollab: Contrastive Trajectory Distillation
 =============================================================
-Implementação completa do pipeline MemCollab (arXiv:2603.23234).
+Full implementation of the MemCollab pipeline (arXiv:2603.23234).
 
-Princípio central:
-  Memórias de agentes são agent-specific (vieses, estilo, heurísticas).
-  Para criar memórias transferíveis entre modelos DIFERENTES,
-  contrastamos trajetórias de um modelo FORTE vs FRACO no MESMO problema.
-  O que é INVARIANTE entre ambos = princípio transferível.
-  O que é específico do fraco = viés a eliminar.
+Core Principle:
+  Agent memories are agent-specific (biases, style, heuristics).
+  To create transferable memories between DIFFERENT models,
+  we contrast trajectories from a STRONG vs. WEAK model on the SAME problem.
+  What is INVARIANT between both = transferable principle.
+  What is specific to the weak model = bias to be eliminated.
 
-Pipeline de 5 estágios:
-  1. Dual Trajectory Generation   → Gera τ_fraco e τ_forte para a mesma task
-  2. Contrastive Analysis          → Extrai constraints (invariants + violations)
-  3. Task Classification           → Category/Subcategory (p/ retrieval task-aware)
-  4. Skill Synthesis              → Monta JSON estruturado da skill
-  5. Markdown Render               → Produz SKILL.md final
+5-Stage Pipeline:
+  1. Dual Trajectory Generation   → Generates τ_weak and τ_strong for the same task
+  2. Contrastive Analysis          → Extracts constraints (invariants + violations)
+  3. Task Classification           → Category/Subcategory (for task-aware retrieval)
+  4. Skill Synthesis              → Assembles structured skill JSON
+  5. Markdown Render               → Produces final SKILL.md
 
-Não faz I/O — recebe LLMProvider e retorna dados puros.
+Does not perform I/O — receives LLMProvider and returns pure data.
 """
 
 from __future__ import annotations
@@ -38,18 +38,18 @@ log = structlog.get_logger()
 
 
 def _slugify(text: str) -> str:
-    """Converte 'Optimal Fibonacci' para 'optimal-fibonacci' (Padrão Agent Skills)."""
+    """Converts 'Optimal Fibonacci' to 'optimal-fibonacci' (Agent Skills standard)."""
     import re
-    # Remove caracteres especiais, troca espaços por hífens e deixa minúsculo
+    # Remove special characters, replace spaces with hyphens, and convert to lowercase
     text = re.sub(r'[^a-zA-Z0-9\s-]', '', text).strip().lower()
     text = re.sub(r'[\s-]+', '-', text)
-    return text[:64] # O padrão exige max 64 chars
+    return text[:64] # Standard requires max 64 chars
 
-# ── Data Classes de Output ───────────────────────────────────────────────────
+# ── Output Data Classes ──────────────────────────────────────────────────────
 
 @dataclass
 class DualTrajectories:
-    """Par de trajetórias para o mesmo problema."""
+    """Pair of trajectories for the same problem."""
     task: str
     weak_model: str
     strong_model: str
@@ -60,17 +60,17 @@ class DualTrajectories:
 
     @property
     def preferred(self) -> tuple[str, bool]:
-        """Retorna (trajetória preferida, se veio do forte)."""
+        """Returns (preferred trajectory, whether it came from the strong model)."""
         if self.strong_success:
             return self.strong_trajectory, True
         if self.weak_success:
             return self.weak_trajectory, False
-        # Nenhum成功 — usa o forte por ser mais capaz
+        # No success — use strong as it is more capable
         return self.strong_trajectory, True
 
     @property
     def unpreferred(self) -> tuple[str, bool]:
-        """Retorna (trajetória não-preferida, se veio do fraco)."""
+        """Returns (unpreferred trajectory, whether it came from the weak model)."""
         if self.strong_success:
             return self.weak_trajectory, False
         if self.weak_success:
@@ -80,7 +80,7 @@ class DualTrajectories:
 
 @dataclass
 class TaskClassification:
-    """Resultado da classificação de tarefa para retrieval task-aware."""
+    """Result of task classification for task-aware retrieval."""
     category: str
     subcategory: str
 
@@ -88,11 +88,11 @@ class TaskClassification:
 @dataclass
 class ExtractedConstraints:
     """
-    Constraints extraídas da análise contrastiva.
-    Formato: lista de strings "When X, enforce Y; avoid Z"
+    Constraints extracted from contrastive analysis.
+    Format: list of strings "When X, enforce Y; avoid Z"
     """
     items: list[str]
-    reasoning: str = ""  # Trace do raciocínio do LLM
+    reasoning: str = ""  # LLM reasoning trace
 
     def __len__(self) -> int:
         return len(self.items)
@@ -106,7 +106,7 @@ class ExtractedConstraints:
 
 @dataclass
 class SkillData:
-    """Dados estruturados de uma skill (antes de renderizar)."""
+    """Structured skill data (before rendering)."""
     title: str
     domain: str
     description: str
@@ -120,7 +120,7 @@ class SkillData:
     source_constraints: list[str] = field(default_factory=list)
 
 
-# ── Prompts do Sistema ───────────────────────────────────────────────────────
+# ── System Prompts ───────────────────────────────────────────────────────
 
 CRAFTER_SYSTEM_PROMPT = (
     "You are an expert skill architect for AI reasoning agents.\n"
@@ -213,7 +213,7 @@ SYNTHESIZE_USER_TEMPLATE = (
     "}}"
 )
 
-# ── LLM Helpers (privados) ──────────────────────────────────────────────────
+# ── LLM Helpers (private) ──────────────────────────────────────────────────
 
 async def _call_llm(
     llm: BaseLLMProvider,
@@ -221,7 +221,7 @@ async def _call_llm(
     max_tokens: int,
     temperature: float = 0.7,
 ) -> str:
-    """Chamada básica ao LLM com error handling."""
+    """Basic LLM call with error handling."""
     try:
         resp = await llm.generate(
             messages=messages,
@@ -234,21 +234,21 @@ async def _call_llm(
         raise
 def _strip_think(text: str) -> str:
     """
-    Remove blocos de raciocínio <think>...</think> comuns em modelos de CoT (Chain of Thought).
-    Isso evita que o log de pensamento do modelo interfira no parsing de JSON ou listas.
+    Removes <think>...</think> reasoning blocks common in CoT (Chain of Thought) models.
+    This prevents the model's thinking log from interfering with JSON or list parsing.
     """
     if not text:
         return ""
-    # Remove as tags <think> e tudo que estiver dentro delas (non-greedy)
-    # flags=re.DOTALL permite que o '.' capture quebras de linha
-    # flags=re.IGNORECASE lida com variações como <THINK>
+    # Removes <think> tags and everything inside them (non-greedy)
+    # flags=re.DOTALL allows '.' to capture line breaks
+    # flags=re.IGNORECASE handles variations like <THINK>
     cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
     return cleaned.strip()
 
 class SkillCrafter:
     """
-    Orquestrador do pipeline MemCollab.
-    Transforma uma tarefa bruta em uma Skill.md refinada.
+    MemCollab pipeline orchestrator.
+    Transforms a raw task into a refined Skill.md.
     """
 
     def __init__(self, llm: BaseLLMProvider):
@@ -257,7 +257,7 @@ class SkillCrafter:
     async def generate_trajectories(
             self, task: str, weak_model: str, strong_model: str
     ) -> tuple[str, str]:
-        """Gera as trajetórias tau_w e tau_s em paralelo."""
+        """Generates tau_w and tau_s trajectories in parallel."""
         import asyncio
 
         async def _run(model_id: str):
@@ -265,12 +265,12 @@ class SkillCrafter:
                 LLMMessage(role="system", content=TRAJECTORY_SYSTEM_PROMPT),
                 LLMMessage(role="user", content=TRAJECTORY_USER_TEMPLATE.format(task=task)),
             ]
-            # Nota: Aqui o BaseLLMProvider deve suportar a troca de modelo se for OpenRouter,
-            # ou ignorar se for um modelo local fixo.
+            # Note: Here the BaseLLMProvider must support model switching if it's OpenRouter,
+            # or ignore it if it's a fixed local model.
             resp = await self.llm.generate(messages, max_tokens=3000)
             return resp.content
 
-        # Execução paralela para performance
+        # Parallel execution for performance
         return await asyncio.gather(_run(weak_model), _run(strong_model))
 
     async def co_evolve_skill_bundle(
@@ -282,11 +282,11 @@ class SkillCrafter:
             max_iters: int = 5
     ) -> tuple[dict, str]:
         """
-        Algoritmo 1 (EvoSkills): Loop de Co-Evolução.
-        Gera a lógica, escreve o código, testa e refina iterativamente.
+        Algorithm 1 (EvoSkills): Co-Evolution Loop.
+        Generates logic, writes code, tests, and refines iteratively.
 
-        CORREÇÃO: passa skill_code ao generate_tests para inferência correta
-                  do nome da função. diagnostic nunca mais vazio.
+        FIX: passes skill_code to generate_tests for correct function name inference. 
+             diagnostic is never empty again.
         """
         constraints_str = "\n".join([f"- {c}" for c in constraints])
 
@@ -299,16 +299,16 @@ class SkillCrafter:
             )),
         ]
 
-        # 1ª Geração (One-Shot)
+        # 1st Generation (One-Shot)
         raw_response = await _call_llm(self.llm, messages, max_tokens=3000)
         skill_json = self._extract_json(raw_response) or {"title": "Unnamed", "domain": "General"}
         skill_code = self._extract_python_code(raw_response)
 
-        # Passa skill_code para que o verifier infira o nome da função principal
+        # Passes skill_code so the verifier can infer the main function name
         log.info("evoskills.generating_surrogate_tests", task=task[:30])
         test_code = await verifier.generate_tests(task, skill_code=skill_code)
 
-        # Loop de Evolução Iterativa (co-evolutionary loop)
+        # Iterative Evolution Loop (co-evolutionary loop)
         for i in range(max_iters):
             log.info("evoskills.verifying_iteration", iteration=i + 1, max=max_iters)
 
@@ -318,7 +318,7 @@ class SkillCrafter:
                 log.info("evoskills.verification_passed", iteration=i + 1)
                 break
 
-            # diagnostic agora SEMPRE contém informação útil
+            # diagnostic now ALWAYS contains useful information
             log.warning(
                 "evoskills.verification_failed",
                 iteration=i + 1,
@@ -326,16 +326,16 @@ class SkillCrafter:
             )
 
             if not skill_code.strip():
-                # Código vazio — gera do zero em vez de tentar refinar
+                # Empty code — generate from scratch instead of attempting refinement
                 log.warning("evoskills.empty_code_regenerating", iteration=i + 1)
                 raw_response = await _call_llm(self.llm, messages, max_tokens=3000)
                 skill_json = self._extract_json(raw_response) or skill_json
                 skill_code = self._extract_python_code(raw_response)
-                # Atualiza testes para o novo código
+                # Update tests for the new code
                 test_code = await verifier.generate_tests(task, skill_code=skill_code)
                 continue
 
-            # Refinamento com feedback real do verifier (Eq 5, 7 do EvoSkills)
+            # Refinement with real feedback from the verifier (Eq 5, 7 from EvoSkills)
             refine_msgs = [
                 LLMMessage(
                     role="system",
@@ -356,7 +356,7 @@ class SkillCrafter:
 
             if new_code.strip():
                 skill_code = new_code
-                # Atualiza testes se o nome da função mudou
+                # Update tests if the function name has changed
                 test_code = await verifier.generate_tests(task, skill_code=skill_code)
 
         return skill_json, skill_code
@@ -369,7 +369,7 @@ class SkillCrafter:
     async def contrastive_analysis(
             self, task: str, preferred: str, unpreferred: str
     ) -> list[str]:
-        """Extrai as lições invariantes entre as duas tentativas."""
+        """Extracts invariant lessons between the two attempts."""
         messages = [
             LLMMessage(role="system", content=CONSTRASTIVE_SYSTEM_PROMPT),
             LLMMessage(role="user", content=CONSTRASTIVE_USER_TEMPLATE.format(
@@ -379,12 +379,12 @@ class SkillCrafter:
         raw = await _call_llm(self.llm, messages, max_tokens=2000, temperature=0.3)
         cleaned = _strip_think(raw)
 
-        # Parse simples de lista numerada
+        # Simple numbered list parsing
         items = re.findall(r'^\d+[\.\)]\s*(.*)', cleaned, re.MULTILINE)
         return items if items else [cleaned]
 
     async def classify_task(self, task: str) -> dict:
-        """Determina a categoria para o retrieval geométrico futuro."""
+        """Determines the category for future geometric retrieval."""
         messages = [
             LLMMessage(role="system", content=CLASSIFY_SYSTEM_PROMPT),
             LLMMessage(role="user", content=CLASSIFY_USER_TEMPLATE.format(task=task)),
@@ -399,7 +399,7 @@ class SkillCrafter:
             weak_trajectory: str,
             strong_trajectory: str
     ) -> dict:
-        """Funde as lições em um objeto Skill estruturado."""
+        """Merges lessons into a structured Skill object."""
         constraints_str = "\n".join([f"- {c}" for c in constraints])
 
         messages = [
@@ -407,7 +407,7 @@ class SkillCrafter:
             LLMMessage(role="user", content=SYNTHESIZE_USER_TEMPLATE.format(
                 task=task,
                 constraints=constraints_str,
-                strong_trajectory=strong_trajectory[:800]  # Slice feito aqui!
+                strong_trajectory=strong_trajectory[:800]  # Slice performed here!
             )),
         ]
         raw = await _call_llm(self.llm, messages, max_tokens=2500, temperature=0.5)
@@ -423,12 +423,12 @@ class SkillCrafter:
             strong_traj: str,
             constraints: list[str]
     ) -> str:
-        """Renderiza o arquivo SKILL.md 100% compatível com o padrão Agent Skills."""
+        """Renders the SKILL.md file 100% compatible with the Agent Skills standard."""
 
         title = skill.get('title', 'Unnamed Skill')
         slug_name = _slugify(title)
 
-        # Evita quebra de YAML e limita tamanho
+        # Prevents YAML breakage and limits size
         description = skill.get('description', f"Workflow and utilities for {task}").strip()
         when_to_apply = skill.get('when_to_apply', description).strip()
         yaml_desc = (description + " " + when_to_apply)[:1000]
@@ -437,7 +437,7 @@ class SkillCrafter:
         viol_md = "\n".join(f"- ⚠️ {v}" for v in skill.get("violations", []))
         con_md = "\n".join(f"- {c}" for c in skill.get("constraints", []))
 
-        # IMPORTANTE: sem indentação no início
+        # IMPORTANT: no indentation at the beginning
         return f"""---
     name: {slug_name}
     description: "{yaml_desc}"
@@ -482,23 +482,23 @@ class SkillCrafter:
     """
 
     def _extract_json(self, text: str) -> Optional[dict]:
-        """Extrai JSON de forma ultra-robusta, limpando blocos de raciocínio."""
+        """Extracts JSON in an ultra-robust way, cleaning reasoning blocks."""
         text = _strip_think(text)
         try:
-            # 1. Tenta achar bloco ```json ... ```
+            # 1. Tries to find ```json ... ``` block
             import re
             m = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
             if m:
                 return json.loads(m.group(1))
 
-            # 2. Tenta achar o primeiro { e o último } no texto todo
+            # 2. Tries to find the first { and the last } in the entire text
             m = re.search(r'(\{.*\})', text, re.DOTALL)
             if m:
                 return json.loads(m.group(1))
 
             return json.loads(text)
         except Exception:
-            # Se falhar, tenta extrair o título via Regex simples como último recurso
+            # If it fails, tries to extract the title via simple Regex as a last resort
             title_match = re.search(r'"title":\s*"(.*?)"', text)
             if title_match:
                 return {"title": title_match.group(1)}

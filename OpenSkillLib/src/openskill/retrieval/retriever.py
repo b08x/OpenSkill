@@ -1,13 +1,13 @@
 """
 retriever.py — OpenSkillRetriever: Unified S-Path-RAG & TurboQuant Retrieval
 =============================================================================
-Alterações em relação à versão anterior:
+Changes from previous version:
 
-  - RetrievalGuidance.skill_alphas: list[float]  (NOVO — Eq 5)
-  - retrieve(): propaga best_path.node_scores → guidance.skill_alphas
-  - aggregate_path_vectors(): usa skill_alphas reais (Eq 5) com fallback uniforme
+  - RetrievalGuidance.skill_alphas: list[float]  (NEW — Eq 5)
+  - retrieve(): propagates best_path.node_scores → guidance.skill_alphas
+  - aggregate_path_vectors(): uses real skill_alphas (Eq 5) with uniform fallback
 
-Nenhuma interface pública foi quebrada.
+No public interface was broken.
 """
 
 from __future__ import annotations
@@ -31,29 +31,29 @@ log = structlog.get_logger()
 
 @dataclass
 class RetrievalGuidance:
-    """O pacote completo de orientação para o LLM Gerador."""
+    """The complete guidance package for the Generator LLM."""
     query: str
     best_path_ids: list[str]
 
-    # Vetores de-quantizados prontos para Soft Latent Injection
+    # Dequantized vectors ready for Soft Latent Injection
     skill_vectors: list[np.ndarray] = field(default_factory=list)
 
-    # Eq 5: alpha_p = w_tilde_p * v_eta_p, normalizado
-    # Um float por skill em best_path_ids (mesma ordem que skill_vectors)
+    # Eq 5: alpha_p = w_tilde_p * v_eta_p, normalized
+    # One float per skill in best_path_ids (same order as skill_vectors)
     skill_alphas: list[float] = field(default_factory=list)
 
-    # Conteúdo Markdown das skills no caminho
+    # Markdown content of skills in path
     skill_contents: list[str] = field(default_factory=list)
 
-    # Metadados detalhados
+    # Detailed metadata
     skills_meta: list[dict] = field(default_factory=list)
 
-    # Diagnóstico do processo socrático
+    # Socratic process diagnostics
     confidence: float = 0.0
     reasoning_trace: str = ""
 
 
-# ── Classe Principal ──────────────────────────────────────────────────────────
+# ── Main Class ──────────────────────────────────────────────────────────
 
 class OpenSkillRetriever:
     def __init__(
@@ -77,10 +77,10 @@ class OpenSkillRetriever:
     ) -> RetrievalGuidance:
         log.info("retrieval.start", query=query[:50])
 
-        # 1. Obter Query Vec
+        # 1. Get Query Vec
         query_vec = await self.quantizer.embed(self.llm, query)
 
-        # 2. Busca Híbrida (Grafo)
+        # 2. Hybrid Search (Graph)
         graph_result = await self.graph.find_paths(
             query_vec=query_vec,
             query_text=query,
@@ -88,16 +88,16 @@ class OpenSkillRetriever:
             use_gnn=use_gnn
         )
 
-        # 3. Fallback Inteligente: Se o Grafo falhou, busca por similaridade vetorial simples
+        # 3. Intelligent Fallback: If Graph failed, search by simple vector similarity
         skill_ids_to_process = graph_result.paths[0].node_ids if graph_result.paths else []
 
         if not skill_ids_to_process:
             log.info("retrieval.fallback_to_semantic_search")
             all_metas = await self.store.list_skills()
-            # Ordena skills pela similaridade vetorial simples
+            # Sort skills by simple vector similarity
             sims = []
             for m in all_metas:
-                # Extrai vetor da skill (mesma lógica do _get_seeds)
+                # Extract skill vector (same logic as _get_seeds)
                 vec = None
                 if m.vectors and 'default' in m.vectors:
                     vec = np.array(m.vectors['default'].embedding)
@@ -111,8 +111,8 @@ class OpenSkillRetriever:
             sims.sort(key=lambda x: x[1], reverse=True)
             skill_ids_to_process = [s[0] for s in sims[:top_k]]
 
-        # 4. Monta guidance (agora com skill_ids_to_process garantido)
-        # Usa node_scores do scorer (Eq 5) se disponíveis, senão fallback uniforme
+        # 4. Assemble guidance (now with guaranteed skill_ids_to_process)
+        # Use node_scores from scorer (Eq 5) if available, otherwise uniform fallback
         best_node_scores = (
             graph_result.paths[0].node_scores
             if graph_result.paths and graph_result.paths[0].node_scores
@@ -132,7 +132,7 @@ class OpenSkillRetriever:
             skill_alphas=skill_alphas,
         )
 
-        # 5. Enriquecimento (O mesmo de sempre)
+        # 5. Enrichment (Same as always)
         for skill_id in skill_ids_to_process:
             meta = await self.store.get_skill_meta(skill_id)
             if not meta: continue
@@ -195,10 +195,10 @@ def aggregate_path_vectors(guidance: RetrievalGuidance) -> np.ndarray:
     """
     Eq 5 (S-Path-RAG): z_ctx = Σ alpha_p · Encpath(p)
 
-    alpha_p = w_tilde_p * v_eta_p, normalizado  (calculado em graph._score_path)
+    alpha_p = w_tilde_p * v_eta_p, normalized (calculated in graph._score_path)
 
-    Se skill_alphas estiver vazio (scorer não carregado), usa fallback
-    uniforme para não quebrar o modo verbalization.
+    If skill_alphas is empty (scorer not loaded), uses uniform fallback
+    to not break verbalization mode.
     """
     if not guidance.skill_vectors:
         return np.zeros(384)
@@ -206,11 +206,11 @@ def aggregate_path_vectors(guidance: RetrievalGuidance) -> np.ndarray:
     vectors = np.array(guidance.skill_vectors)   # [N, D]
     N = len(vectors)
 
-    # ── Caminho neural: alphas reais do scorer ────────────────────────────────
+    # ── Neural path: real alphas from scorer ────────────────────────────────
     if guidance.skill_alphas and len(guidance.skill_alphas) == N:
         alphas = np.array(guidance.skill_alphas, dtype=np.float32)
 
-        # Garante soma = 1 (mixture coefficients normalizados)
+        # Ensures sum = 1 (normalized mixture coefficients)
         alphas = alphas / (alphas.sum() + 1e-8)
 
         z_ctx = np.average(vectors, axis=0, weights=alphas)
@@ -221,7 +221,7 @@ def aggregate_path_vectors(guidance: RetrievalGuidance) -> np.ndarray:
             alphas=[f"{a:.3f}" for a in alphas],
         )
 
-    # ── Fallback: alphas parciais (path mais longo que os vetores disponíveis)
+    # ── Fallback: partial alphas (path longer than available vectors)
     elif guidance.skill_alphas:
         n_avail = min(N, len(guidance.skill_alphas))
         alphas = np.array(guidance.skill_alphas[:n_avail], dtype=np.float32)
@@ -229,11 +229,11 @@ def aggregate_path_vectors(guidance: RetrievalGuidance) -> np.ndarray:
         z_ctx = np.average(vectors[:n_avail], axis=0, weights=alphas)
         log.debug("aggregate.partial_alphas", n_used=n_avail, n_total=N)
 
-    # ── Fallback uniforme: scorer não treinado ou modo manual ─────────────────
+    # ── Uniform fallback: untrained scorer or manual mode ─────────────────
     else:
         z_ctx = np.mean(vectors, axis=0)
         log.debug("aggregate.uniform_fallback", n=N)
 
-    # Normaliza para manter a escala do espaço latente
+    # Normalizes to maintain latent space scale
     norm = np.linalg.norm(z_ctx) + 1e-8
     return z_ctx / norm

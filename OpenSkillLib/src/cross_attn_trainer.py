@@ -1,35 +1,35 @@
 """
-cross_attn_trainer.py — Treino do CrossAttentionInjector (Gap 3 via RepE)
+cross_attn_trainer.py — CrossAttentionInjector training (Gap 3 via RepE)
 ==========================================================================
-Treina os gates e projetores K/V do CrossAttentionInjector usando
-Engenharia de Representação (RepE).
+Trains the gates and K/V projectors of CrossAttentionInjector using
+Representation Engineering (RepE).
 
-Em vez de forçar o modelo a gerar texto (o que degrada a gramática via
-Repetition Degeneration), treinamos o injetor para alinhar o estado
-cognitivo do LLM ao de um especialista via MSE no espaço latente.
+Instead of forcing the model to generate text (which degrades grammar via
+Repetition Degeneration), we train the injector to align the cognitive
+state of the LLM to that of an expert via MSE in latent space.
 
-Paradigma "Brain & Soul":
-  Cérebro (Trace2Skill + Verbalization): regras explícitas no System Prompt
-  Alma (CrossAttn + RepE): altera o estado latente para o domínio da skill
+"Brain & Soul" Paradigm:
+  Brain (Trace2Skill + Verbalization): explicit rules in the System Prompt
+  Soul (CrossAttn + RepE): alters the latent state to the skill domain
 
-Loss total:
+Total Loss:
   L_total = L_repe + lambda_align * L_align + L_reg
-  L_repe  = MSE(R_injetado[-1], R_persona[-1])   — alinha estado cognitivo
-  L_align = (alpha_p - attnMass_p)²              — alinha atenção com scorer
-  L_reg   = gates.pow(2).mean() * 1e-4           — suave, sem alvo fixo
+  L_repe  = MSE(R_injected[-1], R_persona[-1])   — aligns cognitive state
+  L_align = (alpha_p - attnMass_p)²              — aligns attention with scorer
+  L_reg   = gates.pow(2).mean() * 1e-4           — smooth, no fixed target
 
-Correções aplicadas em relação à versão anterior:
-  [BUG 1 — CRASH]   Índice de camada usava hidden_size=2048 como base.
-                     Corrigido para num_hidden_layers (ex: 28).
-  [BUG 2 — GRAD]    loss_align era float Python (0.0) quando batch vazio,
-                     saía do grafo computacional. Agora é tensor com grad.
-  [BUG 3 — DESIGN]  Gate regularizer forçava 0.20 arbitrário.
-                     Substituído por L2 suave nos gates.
-  [BUG 4 — GRAD]    F.normalize eliminava gradiente de magnitude de k_proj.
-                     k_proj só aprendia direção, não intensidade. Removido.
-                     Escala suave via norma do embedding table do LLM.
-  [EXTRA — DTYPE]   mse_loss entre bfloat16 e float32 pode silenciar gradientes.
-                     Ambos os tensores castados para float32 antes do MSE.
+Corrections applied compared to previous version:
+  [BUG 1 — CRASH]   Layer index used hidden_size=2048 as base.
+                     Fixed to num_hidden_layers (e.g., 28).
+  [BUG 2 — GRAD]    loss_align was Python float (0.0) when batch empty,
+                     leaving computational graph. Now it's a tensor with grad.
+  [BUG 3 — DESIGN]  Gate regularizer forced arbitrary 0.20.
+                     Replaced with smooth L2 on gates.
+  [BUG 4 — GRAD]    F.normalize eliminated k_proj magnitude gradient.
+                     k_proj only learned direction, not intensity. Removed.
+                     Smooth scale via LLM embedding table norm.
+  [EXTRA — DTYPE]   mse_loss between bfloat16 and float32 can silence gradients.
+                     Both tensors cast to float32 before MSE.
 """
 
 from __future__ import annotations
@@ -54,11 +54,11 @@ BATCH_SIZE           = 4
 LAMBDA_ALIGN         = 1.0
 
 
-# ── Carregamento ──────────────────────────────────────────────────────────────
+# ── Loading ──────────────────────────────────────────────────────────────
 
 def load_frozen_llm(model_id: str, device: str):
     from transformers import AutoModelForCausalLM, AutoTokenizer
-    print(f"  Carregando LLM ({model_id}) em modo eager (congelado)...")
+    print(f"  Loading LLM ({model_id}) in eager mode (frozen)...")
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
@@ -71,12 +71,12 @@ def load_frozen_llm(model_id: str, device: str):
         p.requires_grad_(False)
     model.eval()
     cfg = model.config
-    print(f"  LLM pronto: hidden={cfg.hidden_size}, layers={cfg.num_hidden_layers}")
+    print(f"  LLM ready: hidden={cfg.hidden_size}, layers={cfg.num_hidden_layers}")
     return model, tokenizer
 
 
 def get_decoder_layers(model):
-    """Navega até as decoder layers para Qwen2/Qwen3."""
+    """Navigates to decoder layers for Qwen2/Qwen3."""
     for attr in ["model", "transformer"]:
         backbone = getattr(model, attr, None)
         if backbone is not None:
@@ -88,10 +88,10 @@ def get_decoder_layers(model):
 
 def resolve_target_layers(model, n_layers: int) -> list[int]:
     """
-    BUG 1 CORRIGIDO: base = num_hidden_layers, não hidden_size.
+    BUG 1 FIXED: base = num_hidden_layers, not hidden_size.
 
-    Antes (errado): range(2048 - 7, 2048) → [2041..2047] → IndexError
-    Depois (certo): range(28 - 7, 28)     → [21..27]     → OK
+    Before (wrong): range(2048 - 7, 2048) → [2041..2047] → IndexError
+    After (right):  range(28 - 7, 28)     → [21..27]     → OK
     """
     total  = model.config.num_hidden_layers
     start  = max(0, total - n_layers)
@@ -100,7 +100,7 @@ def resolve_target_layers(model, n_layers: int) -> list[int]:
     return result
 
 
-# ── Forward com injeção + captura attnMass ────────────────────────────────────
+# ── Forward with injection + attnMass capture ────────────────────────────────────
 
 def forward_with_injection_and_capture(
     model,
@@ -112,13 +112,13 @@ def forward_with_injection_and_capture(
     device: str,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Forward pass com hooks de injeção ativos.
-    Instala hooks de captura adicionais para medir attnMass.
+    Forward pass with active injection hooks.
+    Installs additional capture hooks to measure attnMass.
 
-    Retorna:
-      R_injected : hidden_states[-1] [B, T, H] — com gradiente via K_graph
-      l_align    : (alpha_p - attnMass_p)² — com gradiente
-      attn_norm  : attnMass detached — para logging
+    Returns:
+      R_injected : hidden_states[-1] [B, T, H] — with gradient via K_graph
+      l_align    : (alpha_p - attnMass_p)² — with gradient
+      attn_norm  : attnMass detached — for logging
     """
     captured: list[torch.Tensor] = []
 
@@ -159,7 +159,7 @@ def forward_with_injection_and_capture(
     for h in handles:
         h.remove()
 
-    # BUG 2 CORRIGIDO: retorna tensor com grad quando sem captures
+    # BUG 2 FIXED: return tensor with grad when no captures
     if not captured:
         zero = torch.tensor(0.0, requires_grad=True, device=device)
         return R_full, zero, torch.zeros(len(skill_alphas), device=device)
@@ -174,7 +174,7 @@ def forward_with_injection_and_capture(
     return R_full, l_align, attn_norm.detach()
 
 
-# ── Loop de treino ────────────────────────────────────────────────────────────
+# ── Training Loop ────────────────────────────────────────────────────────────
 
 async def train_cross_attn(
     skill_dir: str,
@@ -190,8 +190,8 @@ async def train_cross_attn(
     # 1. Scorer
     scorer_path = skill_path / SCORER_SAVE_NAME
     if not scorer_path.exists():
-        print(f"ERRO: {scorer_path} não encontrado.")
-        print("Execute: python train_scorer.py --skill-dir", skill_dir)
+        print(f"ERROR: {scorer_path} not found.")
+        print("Run: python train_scorer.py --skill-dir", skill_dir)
         sys.exit(1)
 
     from safetensors.torch import load_file as st_load
@@ -207,7 +207,7 @@ async def train_cross_attn(
     model, tokenizer = load_frozen_llm(model_id, device)
     params = detect_qwen_params(model)
 
-    # BUG 1 CORRIGIDO aqui
+    # BUG 1 FIXED here
     target_abs_idx = resolve_target_layers(model, params["n_layers"])
 
     # 3. Injector
@@ -220,7 +220,7 @@ async def train_cross_attn(
             num_heads=params["num_heads"],
             device=device,
         )
-        print(f"  Injector carregado: {inj_path}")
+        print(f"  Injector loaded: {inj_path}")
     else:
         inj = CrossAttentionInjector(
             embed_dim=384,
@@ -228,7 +228,7 @@ async def train_cross_attn(
             n_layers=params["n_layers"],
             num_heads=params["num_heads"],
         )
-        print(f"  Injector novo: {params['n_layers']} camadas × {params['hidden_size']}d")
+        print(f"  New injector: {params['n_layers']} layers × {params['hidden_size']}d")
 
     inj = inj.to(device).to(torch.float32)
     inj.install(model)
@@ -237,17 +237,17 @@ async def train_cross_attn(
     # 4. Dataset
     cache = Path(data_cache)
     if not cache.exists():
-        print(f"ERRO: {cache} não encontrado.")
-        print("Execute: python train_scorer.py --skill-dir", skill_dir, "--only-data")
+        print(f"ERROR: {cache} not found.")
+        print("Run: python train_scorer.py --skill-dir", skill_dir, "--only-data")
         sys.exit(1)
 
     from bootstrap_data import load_dataset
     train_data, _ = load_dataset(str(cache))
     positives = [(q, p) for q, p, is_pos in train_data if is_pos]
     if not positives:
-        print("ERRO: sem amostras positivas.")
+        print("ERROR: no positive samples.")
         sys.exit(1)
-    print(f"  {len(positives)} amostras positivas")
+    print(f"  {len(positives)} positive samples")
 
     from openskill.storage.local import LocalDiskStore
     store     = LocalDiskStore(skill_dir)
@@ -263,11 +263,11 @@ async def train_cross_attn(
 
     skill_vecs   = [v for _, v in skill_index]
     skill_titles = [t for t, _ in skill_index]
-    print(f"  {len(skill_vecs)} skills com vetores 384d")
+    print(f"  {len(skill_vecs)} skills with 384d vectors")
 
     # 5. Optimizer
-    # BUG 3 CORRIGIDO: weight_decay=1e-4 já regulariza; gates recebem L2 suave
-    # adicional dentro da loss, sem forçar valor fixo
+    # BUG 3 FIXED: weight_decay=1e-4 already regularizes; gates receive smooth L2
+    # additional inside loss, without forcing fixed value
     optimizer = torch.optim.AdamW(inj.parameters(), lr=lr, weight_decay=1e-4)
     steps_per_epoch = math.ceil(len(positives) / BATCH_SIZE)
     total_steps     = epochs * steps_per_epoch
@@ -277,14 +277,14 @@ async def train_cross_attn(
         pct_start=warmup_steps / total_steps,
     )
 
-    print(f"\n  Treinando (RepE Brain & Soul) por {epochs} epochs...")
+    print(f"\n  Training (RepE Brain & Soul) for {epochs} epochs...")
     print(f"  LR: {lr}  |  Lambda_align: {lambda_align}  |  Batch: {BATCH_SIZE}")
     print()
 
     best_loss   = float("inf")
     model_dtype = next(model.parameters()).dtype
 
-    # Referência de escala: norma do embedding table (estável, representa espaço do LLM)
+    # Scale reference: embedding table norm (stable, represents LLM space)
     with torch.no_grad():
         emb_norm = model.get_input_embeddings().weight.norm(dim=-1).mean().item()
     log.info("cross_attn.emb_norm_ref", emb_norm=f"{emb_norm:.2f}")
@@ -303,7 +303,7 @@ async def train_cross_attn(
 
             for q_vec, s_vec in batch:
 
-                # Path: positiva + 1 negativa
+                # Path: positive + 1 negative
                 neg_cands = [
                     i for i in range(len(skill_vecs))
                     if not np.allclose(skill_vecs[i], s_vec, atol=1e-4)
@@ -349,7 +349,7 @@ async def train_cross_attn(
                 enc_neutral = tokenizer(neutral_prompt, return_tensors="pt").to(device)
                 enc_persona = tokenizer(persona_prompt, return_tensors="pt").to(device)
 
-                # PASSO A: R_target — LLM com persona, sem injeção
+                # STEP A: R_target — LLM with persona, no injection
                 inj.clear_context()
                 with torch.no_grad():
                     out_t = model(
@@ -358,17 +358,17 @@ async def train_cross_attn(
                         output_hidden_states=True,
                         use_cache=False,
                     )
-                    # EXTRA CORRIGIDO: float32 evita dtype mismatch no MSE
+                    # EXTRA FIXED: float32 avoids dtype mismatch in MSE
                     R_target = out_t.hidden_states[-1][:, -1, :].float().detach()
 
-                # PASSO B: K_graph e V_graph
+                # STEP B: K_graph and V_graph
                 skills_t = torch.tensor(
                     np.array(path_vecs), dtype=torch.float32, device=device
                 )
 
-                # BUG 4 CORRIGIDO: sem F.normalize — k_proj aprende direção E amplitude
-                # Escala suave baseada na norma do embedding table (referência estável)
-                K = inj.k_proj(skills_t).to(model_dtype)  # [N, H] — grad preservado
+                # BUG 4 FIXED: no F.normalize — k_proj learns both direction AND amplitude
+                # Smooth scale based on embedding table norm (stable reference)
+                K = inj.k_proj(skills_t).to(model_dtype)  # [N, H] — grad preserved
                 V = inj.v_proj(skills_t).to(model_dtype)
 
                 K_scale = K.norm(dim=-1).mean().clamp(min=1e-6)
@@ -384,7 +384,7 @@ async def train_cross_attn(
                 inj._K_graph = K.unsqueeze(0)
                 inj._V_graph = V.unsqueeze(0)
 
-                # PASSO C: forward injetado
+                # STEP C: injected forward
                 R_full, l_align, attn_mass = forward_with_injection_and_capture(
                     model=model,
                     input_ids=enc_neutral.input_ids,
@@ -395,8 +395,8 @@ async def train_cross_attn(
                     device=device,
                 )
 
-                # PASSO D: L_repe = MSE no espaço latente
-                # EXTRA CORRIGIDO: float32 em ambos
+                # STEP D: L_repe = latent space MSE
+                # EXTRA FIXED: float32 on both
                 R_injected = R_full[:, -1, :].float()
                 l_repe     = F.mse_loss(R_injected, R_target)
 
@@ -418,14 +418,14 @@ async def train_cross_attn(
 
             loss_repe  = torch.stack(batch_repe).mean()
 
-            # BUG 2 CORRIGIDO: tensor com requires_grad quando lista vazia
+            # BUG 2 FIXED: tensor with requires_grad when list empty
             loss_align = (
                 torch.stack(batch_align).mean()
                 if batch_align
                 else torch.tensor(0.0, requires_grad=True, device=device)
             )
 
-            # BUG 3 CORRIGIDO: L2 suave, sem alvo fixo de 0.20
+            # BUG 3 FIXED: smooth L2, no fixed target of 0.20
             l_reg = inj.gates.pow(2).mean() * 1e-4
 
             total = loss_repe + lambda_align * loss_align + l_reg
@@ -455,10 +455,10 @@ async def train_cross_attn(
                 lr=f"{scheduler.get_last_lr()[0]:.6f}",
             )
 
-    print(f"\n  Melhor Loss:  {best_loss:.4f}")
-    print(f"  Salvo em:     {inj_path}")
-    print(f"  Gates finais: {[f'{float(g):.4f}' for g in inj.gates.data]}")
-    print(f"  Treinado:     {inj.is_trained}")
+    print(f"\n  Best Loss:  {best_loss:.4f}")
+    print(f"  Saved to:     {inj_path}")
+    print(f"  Final gates: {[f'{float(g):.4f}' for g in inj.gates.data]}")
+    print(f"  Trained:     {inj.is_trained}")
 
     inj.remove_hooks()
     return {"best_loss": best_loss, "path": str(inj_path)}
@@ -468,7 +468,7 @@ async def train_cross_attn(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Treina CrossAttentionInjector via RepE (S-Path-RAG Gap 3)",
+        description="Trains CrossAttentionInjector via RepE (S-Path-RAG Gap 3)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -481,7 +481,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if not Path(args.skill_dir).exists():
-        print(f"ERRO: '{args.skill_dir}' não encontrada.")
+        print(f"ERROR: '{args.skill_dir}' not found.")
         sys.exit(1)
 
     print("\n" + "=" * 60)
@@ -497,7 +497,7 @@ if __name__ == "__main__":
         lambda_align = args.lambda_align,
     ))
 
-    print("\n  Próximos passos:")
-    print("  1. O local_llm.py carrega o injector automaticamente ao iniciar")
-    print("  2. Use --mode auto (verbalization + cross-attention juntos)")
-    print("  3. openskill retrieve --local --mode auto --query 'sua query'")
+    print("\n  Next steps:")
+    print("  1. local_llm.py loads the projector automatically at startup")
+    print("  2. Use --mode auto (verbalization + cross-attention together)")
+    print("  3. openskill retrieve --local --mode auto --query 'your query'")

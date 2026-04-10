@@ -705,135 +705,71 @@
 
 
   <div class="card mt-4">
-
     <div class="card-header bg-success text-white">
-
-        🔍 Consultar Memória (Task-Aware Retrieval)
-
+        🔍 Consult Memory (Task-Aware Retrieval)
     </div>
-
     <div class="card-body">
-
-        <label>Qual problema você quer resolver agora?</label>
-
-        <textarea id="retrieveTask" class="form-control mb-2" rows="3" placeholder="Ex: Preciso criar um algoritmo de ordenação em Python..."></textarea>
-
-        <button id="btnRetrieve" class="btn btn-success">Buscar Skills Relevantes</button>
-
-
+        <label>What problem do you want to solve now?</label>
+        <textarea id="retrieveTask" class="form-control mb-2" rows="3" placeholder="Ex: I need to create a sorting algorithm in Python..."></textarea>
+        <button id="btnRetrieve" class="btn btn-success">Search Relevant Skills</button>
 
         <div id="retrieveResult" class="mt-3" style="display:none;">
-
-            <h5>Classificação Identificada:</h5>
-
+            <h5>Identified Classification:</h5>
             <span id="badgeCat" class="badge bg-primary"></span>
-
             <span id="badgeSub" class="badge bg-secondary"></span>
 
-
-
-            <h5 class="mt-3">Skills Recomendadas:</h5>
-
+            <h5 class="mt-3">Recommended Skills:</h5>
             <div id="recommendedSkills" class="list-group"></div>
-
         </div>
-
     </div>
-
 </div>
 </main>
 <script>
-
 document.getElementById('btnRetrieve').addEventListener('click', async () => {
-
     const query = document.getElementById('retrieveTask').value;
-
-    const apiKey = document.getElementById('apiKey').value; // assumindo que vc já tem esse input no HTML
-
-
+    const apiKey = document.getElementById('apiKey').value; // assuming you already have this input in the HTML
 
     if(!query || !apiKey) {
-
-        alert("Preencha a tarefa e a API Key.");
-
+        alert("Please fill in the task and the API Key.");
         return;
-
     }
 
-
-
-    document.getElementById('btnRetrieve').innerText = "Classificando e Buscando...";
-
-
+    document.getElementById('btnRetrieve').innerText = "Classifying and Searching...";
 
     try {
-
         const res = await fetch('/api/retrieve', {
-
             method: 'POST',
-
             headers: {'Content-Type': 'application/json'},
-
             body: JSON.stringify({ query: query, api_key: apiKey })
-
         });
-
-
 
         const data = await res.json();
 
-
-
         document.getElementById('retrieveResult').style.display = 'block';
-
         document.getElementById('badgeCat').innerText = data.classification.category;
-
         document.getElementById('badgeSub').innerText = data.classification.subcategory;
 
-
-
         const list = document.getElementById('recommendedSkills');
-
         list.innerHTML = '';
 
-
-
         if(data.results.length === 0) {
-
-            list.innerHTML = '<div class="alert alert-warning">Nenhuma skill relevante encontrada para esta categoria.</div>';
-
+            list.innerHTML = '<div class="alert alert-warning">No relevant skills found for this category.</div>';
         } else {
-
             data.results.forEach(item => {
-
                 list.innerHTML += `
-
                     <a href="/api/skills/${item.meta.id}/download" class="list-group-item list-group-item-action">
-
                         <strong>${item.meta.title}</strong><br>
-
-                        <small class="text-muted">Relevância (Score): ${item.score}</small>
-
+                        <small class="text-muted">Relevance (Score): ${item.score}</small>
                     </a>
-
                 `;
-
             });
-
         }
-
     } catch(err) {
-
-        alert("Erro na busca: " + err);
-
+        alert("Search error: " + err);
     }
 
-
-
-    document.getElementById('btnRetrieve').innerText = "Buscar Skills Relevantes";
-
+    document.getElementById('btnRetrieve').innerText = "Search Relevant Skills";
 });
-
 </script>
 <script>
 // ── State ──
