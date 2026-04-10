@@ -43,7 +43,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
-from OpenSkill.openskill.local_llm import generate_with_soft_latents
+from local_llm import generate_with_soft_latents
 # ── New modules ───────────────────────────────────────────────────────────────
 from skill_vector import compute_and_store_embedding, cosine_similarity_raw
 from skill_vector import dequantize_vector, unpack_quantized

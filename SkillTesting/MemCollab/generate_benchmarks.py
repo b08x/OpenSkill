@@ -5,10 +5,10 @@ import requests
 # ==========================================
 # CONFIGURAÇÕES
 # ==========================================
-API_URL = "http://localhost:8000/api/craft"
+API_URL = os.getenv("CRAFT_API_URL", "http://localhost:8000/api/craft")
 
 # Pegue a chave do ambiente ou cole diretamente aqui
-API_KEY = os.getenv("OPENROUTER_API_KEY", "sk-or-v1")
+API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 # Recomendação: 8B para errar (Weak) e R1/Minimax para acertar (Strong)
 WEAK_MODEL = "meta-llama/llama-3.1-8b-instruct"

@@ -1,0 +1,67 @@
+services:
+  openskill-web:
+    build:
+      context: .
+      target: runtime-app
+    container_name: openskill-web
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./skills_output:/app/skills_output
+      - .:/app
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    restart: unless-stopped
+
+  openskill-mcp:
+    build:
+      context: .
+      target: runtime-app
+    container_name: openskill-mcp
+    command: ["python", "mcp_openSkill.py"]
+    ports:
+      - "8001:8001"
+    depends_on:
+      - openskill-web
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    restart: unless-stopped
+
+  openskill-poc:
+    build:
+      context: .
+      target: runtime-poc
+    container_name: openskill-poc
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./OpenSkill1.1/skills_output:/app/OpenSkill1.1/skills_output
+      - ./OpenSkill1.1/templates:/app/OpenSkill1.1/templates
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  openskill-benchmark:
+    build:
+      context: .
+      target: runtime-benchmark
+    container_name: openskill-benchmark
+    depends_on:
+      - openskill-web
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - CRAFT_API_URL=http://openskill-web:8000/api/craft
+      - RETRIEVE_API_URL=http://openskill-web:8000/api/retrieve
+    profiles:
+      - debug
+    restart: "no"
+
+volumes:
+  skills_data:

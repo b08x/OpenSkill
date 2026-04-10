@@ -3,7 +3,8 @@ from pathlib import Path
 import json
 
 # O FastMCP com SSE permite conexões remotas via URL
-mcp = FastMCP("SkillCrafter_Remote", transport="sse")
+# host="0.0.0.0" é necessário para rodar dentro do Docker
+mcp = FastMCP("SkillCrafter_Remote", host="0.0.0.0", port=8001)
 SKILLS_DIR = Path("skills_output")
 
 @mcp.tool()
@@ -29,5 +30,5 @@ async def get_skill_details(skill_id: str) -> str:
     return md_path.read_text(encoding="utf-8")
 
 if __name__ == "__main__":
-    # Roda em um servidor web (ex: porta 8000)
+    # Roda em um servidor web na porta 8001 para evitar conflito com a UI (8000)
     mcp.run(transport="sse")

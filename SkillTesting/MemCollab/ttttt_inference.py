@@ -4,9 +4,9 @@ import requests
 # ==========================================
 # CONFIGURAÇÕES
 # ==========================================
-RETRIEVE_URL = "http://localhost:8000/api/retrieve"
+RETRIEVE_URL = os.getenv("RETRIEVE_API_URL", "http://localhost:8000/api/retrieve")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-API_KEY = os.getenv("OPENROUTER_API_KEY", "sk-or-v")
+API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 # Vamos usar um modelo FRACO para provar que a Skill ensina ele a acertar
 TEST_MODEL = "meta-llama/llama-3.1-8b-instruct"
