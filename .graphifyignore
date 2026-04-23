@@ -1,0 +1,15 @@
+Dockerfile
+**/skills_output/*
+.claude/
+.codemap/
+.dockerignore
+opencode.json
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+README.md
+.opencode
+docker-compose.yml
+**/__pycache__/*
+
+SkillTesting/
