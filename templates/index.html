@@ -719,33 +719,12 @@
           Reference Context <span class="badge" style="background:rgba(124,58,237,0.1);color:var(--accent2);border:1px solid rgba(124,58,237,0.3);">Optional</span>
         </div>
         <div class="upload-zone" id="uploadZone" onclick="document.getElementById('contextFiles').click()">
-          <input type="file" id="contextFiles" multiple accept=".md,.txt,.py,.json,.yaml,.yml,.j2,.tmpl,.sh,.toml,.cfg,.ini" style="display:none;">
+          <input type="file" id="contextFiles" multiple accept=".pdf,.md,.txt,.py,.json,.yaml,.yml,.j2,.tmpl,.sh,.toml,.cfg,.ini,.png,.jpg,.jpeg,.doc,.docx" style="display:none;">
           <div class="upload-icon">📂</div>
           <div>Drop files or click to upload</div>
           <div class="upload-hint">Markdown, text, scripts, templates &mdash; used as reference during skill generation</div>
         </div>
         <div class="file-chips" id="contextFilesList"></div>
-      </div>
-
-      <!-- Context Documents Upload -->
-      <div class="field-group">
-        <div class="field-label">
-          <span class="badge required">context</span>
-          <span>Reference Context</span>
-        </div>
-        <div style="display: grid; gap: 8px;">
-          <label style="padding: 12px; border: 1px dashed var(--border); border-radius: 8px; cursor: pointer; transition: all 0.2s;">
-            <input type="file" id="contextFiles" multiple accept=".pdf,.md,.txt,.png,.jpg,.jpeg,.doc,.docx" style="display: none;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="font-size: 1.2rem;">📁</span>
-              <span>Upload reference documents (optional)</span>
-            </div>
-            <div style="font-size: 0.7rem; color: var(--muted); margin-top: 4px;">
-              Multiple files allowed. PDF, Markdown, Text, Images supported.
-            </div>
-          </label>
-        </div>
-        <div id="contextFilesList" style="display: none; flex-direction: column; gap: 4px;"></div>
       </div>
 
       <button class="craft-btn" id="craftBtn" onclick="craftSkill()">
@@ -758,7 +737,7 @@
     <div class="progress-area" id="progressArea">
       <div class="progress-step" id="step0">
         <span class="step-icon">⬜</span>
-        <span>Loading context documents...</span>
+        <span id="step0Label">Preparing...</span>
       </div>
       <div class="progress-step" id="step1">
         <span class="step-icon">⬜</span>
@@ -802,75 +781,7 @@
     </div>
   </div>
 
-
-  <div class="card mt-4">
-
-    <div class="card-header bg-success text-white">
-        🔍 Consult Memory (Task-Aware Retrieval)
-    </div>
-    <div class="card-body">
-        <label>What problem do you want to solve now?</label>
-        <textarea id="retrieveTask" class="form-control mb-2" rows="3" placeholder="Ex: I need to create a sorting algorithm in Python..."></textarea>
-        <button id="btnRetrieve" class="btn btn-success">Search Relevant Skills</button>
-
-        <div id="retrieveResult" class="mt-3" style="display:none;">
-            <h5>Identified Classification:</h5>
-            <span id="badgeCat" class="badge bg-primary"></span>
-            <span id="badgeSub" class="badge bg-secondary"></span>
-
-            <h5 class="mt-3">Recommended Skills:</h5>
-            <div id="recommendedSkills" class="list-group"></div>
-        </div>
-    </div>
-</div>
 </main>
-<script>
-document.getElementById('btnRetrieve').addEventListener('click', async () => {
-    const query = document.getElementById('retrieveTask').value;
-    const apiKey = document.getElementById('apiKey').value; // assuming you already have this input in the HTML
-
-    if(!query || !apiKey) {
-        alert("Please fill in the task and the API Key.");
-        return;
-    }
-
-    document.getElementById('btnRetrieve').innerText = "Classifying and Searching...";
-
-    try {
-        const res = await fetch('/api/retrieve', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ query: query, api_key: apiKey })
-        });
-
-        const data = await res.json();
-
-        document.getElementById('retrieveResult').style.display = 'block';
-        document.getElementById('badgeCat').innerText = data.classification.category;
-        document.getElementById('badgeSub').innerText = data.classification.subcategory;
-
-        const list = document.getElementById('recommendedSkills');
-        list.innerHTML = '';
-
-        if(data.results.length === 0) {
-            list.innerHTML = '<div class="alert alert-warning">No relevant skills found for this category.</div>';
-        } else {
-            data.results.forEach(item => {
-                list.innerHTML += `
-                    <a href="/api/skills/${item.meta.id}/download" class="list-group-item list-group-item-action">
-                        <strong>${item.meta.title}</strong><br>
-                        <small class="text-muted">Relevance (Score): ${item.score}</small>
-                    </a>
-                `;
-            });
-        }
-    } catch(err) {
-        alert("Search error: " + err);
-    }
-
-    document.getElementById('btnRetrieve').innerText = "Search Relevant Skills";
-});
-</script>
 <script>
 // ── State ──
 let currentSkillId = null;
@@ -936,8 +847,16 @@ function renderFileChips() {
 async function readContextFiles() {
   if (!uploadedContextFiles.length) return null;
   return Promise.all(uploadedContextFiles.map(async f => {
-    const text = await f.text();
-    return { filename: f.name, content: text };
+    const isText = /\.(md|txt|py|json|yaml|yml|j2|tmpl|sh|toml|cfg|ini)$/i.test(f.name);
+    if (isText) {
+      const content = await f.text();
+      return { filename: f.name, content, type: f.type || 'text/plain' };
+    }
+    const buf = await f.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return { filename: f.name, content: btoa(binary), type: f.type || 'application/octet-stream' };
   }));
 }
 
@@ -966,8 +885,15 @@ async function craftSkill() {
 
   const contextDocs = await readContextFiles();
 
-  setStep(0, contextDocs ? 'active' : 'done');
-  if (contextDocs) setTimeout(() => setStep(0, 'done'), 500);
+  const step0Label = document.getElementById('step0Label');
+  if (contextDocs) {
+    step0Label.textContent = `Loading ${contextDocs.length} context document${contextDocs.length > 1 ? 's' : ''}...`;
+    setStep(0, 'active');
+    setTimeout(() => setStep(0, 'done'), 600);
+  } else {
+    step0Label.textContent = 'No context documents';
+    setStep(0, 'done');
+  }
   setStep(1, 'active');
   setTimeout(() => { setStep(1, 'done'); setStep(2, 'active'); }, 800);
   setTimeout(() => { setStep(2, 'done'); setStep(3, 'active'); }, 4000);
@@ -983,7 +909,7 @@ async function craftSkill() {
         api_key: apiKey,
         weak_model: weakModel || undefined,
         strong_model: strongModel || undefined,
-        context_docs: contextDocs ? contextDocs.map(d => d.content) : undefined,
+        context_docs: contextDocs || undefined,
       })
     });
 
@@ -1021,6 +947,17 @@ function renderResult(data) {
   const assetFiles = skill.asset_files || [];
   const hasBundle = refFiles.length || tmplFiles.length || assetFiles.length || sType !== 'passive';
 
+  let contextHtml = '';
+  if (data.context_used && data.context_used.length > 0) {
+    contextHtml = `
+      <div style="font-size:0.6rem;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">
+        Context Documents Used
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:6px;">
+        ${data.context_used.map(d => `<span class="file-chip">📄 ${escHtml(d.filename)}</span>`).join('')}
+      </div>`;
+  }
+
   let bundleHtml = '';
   if (hasBundle) {
     bundleHtml = `
@@ -1047,6 +984,8 @@ function renderResult(data) {
         ↓ Skills.md
       </a>
     </div>
+
+    ${contextHtml}
 
     <p style="font-size:0.78rem;color:var(--muted);line-height:1.6;margin-bottom:16px;">
       ${escHtml(skill.description || '')}

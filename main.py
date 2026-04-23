@@ -179,16 +179,30 @@ async def call_llm(api_key: str, model: str, messages: list, max_tokens: int = 2
 # MemCollab pipeline steps
 # ──────────────────────────────────────────────
 
-async def generate_trajectory(api_key: str, model: str, task: str) -> str:
+async def generate_trajectory(api_key: str, model: str, task: str,
+                              context_docs: list[dict] | None = None) -> str:
+    context_str = ""
+    if context_docs:
+        parts = []
+        for i, doc in enumerate(context_docs):
+            fname = doc.get("filename", f"doc_{i+1}")
+            content = doc.get("content", "")
+            parts.append(f"=== Reference Document: {fname} ===\n{content}")
+        context_str = "\n\n".join(parts)
+        context_str = f"\n\n## Additional Context (reference only):\n{context_str}\n"
+
+    user_content = f"Task:\n{task}"
+    if context_str:
+        user_content = context_str + "\n" + user_content
+
     messages = [
         {"role": "system", "content": (
             "You are a reasoning agent solving the given task step-by-step. "
             "Show your full reasoning process, including intermediate steps, "
             "any code or formulas, and your final answer. Be detailed."
         )},
-        {"role": "user", "content": f"Task:\n{task}"}
+        {"role": "user", "content": user_content}
     ]
-    # Returns raw output (including native reasoning) to be evaluated later
     return await call_llm(api_key, model, messages, max_tokens=3000)
 
 
@@ -385,13 +399,17 @@ async def craft_skill(req: CraftRequest):
     strong = req.strong_model or STRONG_MODEL
 
     # Step 1: Generate trajectories from both agents
+    context_used = []
+    if req.context_docs:
+        context_used = [{"filename": d.get("filename", "")} for d in req.context_docs]
+
     try:
-        weak_traj = await generate_trajectory(req.api_key, weak, req.task)
+        weak_traj = await generate_trajectory(req.api_key, weak, req.task, context_docs=req.context_docs)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Weak agent failed: {str(e)}")
 
     try:
-        strong_traj = await generate_trajectory(req.api_key, strong, req.task)
+        strong_traj = await generate_trajectory(req.api_key, strong, req.task, context_docs=req.context_docs)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Strong agent failed: {str(e)}")
 
@@ -466,6 +484,7 @@ async def craft_skill(req: CraftRequest):
         "constraints": constraints,
         "skill": skill_data,
         "skill_md": skill_md,
+        "context_used": context_used,
     }
 
 
