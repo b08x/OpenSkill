@@ -39,6 +39,7 @@ services:
     volumes:
       - ./OpenSkill1.1/skills_output:/app/OpenSkill1.1/skills_output
       - ./OpenSkill1.1/templates:/app/OpenSkill1.1/templates
+      - ./OpenSkill1.1/main.py:/app/OpenSkill1.1/main.py
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - HF_TOKEN=${HF_TOKEN}
