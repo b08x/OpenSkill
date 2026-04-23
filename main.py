@@ -40,6 +40,7 @@ class CraftRequest(BaseModel):
     api_key: str
     weak_model: Optional[str] = None
     strong_model: Optional[str] = None
+    context_docs: Optional[list[dict]] = None
 
 class SkillEntry(BaseModel):
     id: str

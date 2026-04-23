@@ -233,6 +233,60 @@
   .badge.weak { background: rgba(245,158,11,0.15); color: var(--weak); border: 1px solid rgba(245,158,11,0.3); }
   .badge.strong { background: rgba(0,229,255,0.1); color: var(--strong); border: 1px solid rgba(0,229,255,0.3); }
   .badge.required { background: rgba(239,68,68,0.1); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+  .badge.passive { background: rgba(100,116,139,0.15); color: #94a3b8; border: 1px solid rgba(100,116,139,0.3); }
+  .badge.active-skill { background: rgba(0,229,255,0.1); color: var(--accent); border: 1px solid rgba(0,229,255,0.3); }
+  .badge.hybrid { background: rgba(124,58,237,0.1); color: var(--accent2); border: 1px solid rgba(124,58,237,0.3); }
+
+  .upload-zone {
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+  }
+  .upload-zone:hover, .upload-zone.dragover {
+    border-color: var(--accent);
+    background: rgba(0,229,255,0.04);
+  }
+  .upload-zone.dragover {
+    box-shadow: 0 0 0 3px rgba(0,229,255,0.08);
+  }
+  .upload-icon { font-size: 1.4rem; margin-bottom: 4px; }
+  .upload-hint { font-size: 0.7rem; color: var(--muted); margin-top: 4px; }
+
+  .file-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    font-size: 0.65rem;
+    color: var(--text);
+  }
+  .file-chip .remove {
+    cursor: pointer;
+    color: var(--muted);
+    font-weight: 700;
+    transition: color 0.2s;
+  }
+  .file-chip .remove:hover { color: #f87171; }
+
+  .bundle-tree {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-size: 0.72rem;
+    line-height: 1.9;
+    color: var(--text);
+    margin: 12px 0;
+  }
+  .bundle-tree .folder { color: var(--accent2); font-weight: 600; }
+  .bundle-tree .file-entry { color: var(--muted); padding-left: 16px; }
 
   textarea, input[type="text"], input[type="password"] {
     background: var(--surface2);
@@ -597,6 +651,11 @@
     <!-- Pipeline Visual -->
     <div class="pipeline">
       <div class="pipe-step">
+        <div class="pipe-icon" style="border-color:var(--accent2);color:var(--accent2);">📂</div>
+        <div class="pipe-label">Context</div>
+      </div>
+      <div class="pipe-arrow"></div>
+      <div class="pipe-step">
         <div class="pipe-icon weak">🤖</div>
         <div class="pipe-label">Weak Agent</div>
       </div>
@@ -608,12 +667,12 @@
       <div class="pipe-arrow"></div>
       <div class="pipe-step">
         <div class="pipe-icon contrast">⚡</div>
-        <div class="pipe-label">Contrastive Analysis</div>
+        <div class="pipe-label">Contrastive</div>
       </div>
       <div class="pipe-arrow"></div>
       <div class="pipe-step">
-        <div class="pipe-icon output">📄</div>
-        <div class="pipe-label">Skills.md</div>
+        <div class="pipe-icon output">📦</div>
+        <div class="pipe-label">Skill Bundle</div>
       </div>
     </div>
 
@@ -653,6 +712,19 @@
         </div>
       </div>
 
+      <div class="field-group">
+        <div class="field-label">
+          Reference Context <span class="badge" style="background:rgba(124,58,237,0.1);color:var(--accent2);border:1px solid rgba(124,58,237,0.3);">Optional</span>
+        </div>
+        <div class="upload-zone" id="uploadZone" onclick="document.getElementById('contextFiles').click()">
+          <input type="file" id="contextFiles" multiple accept=".md,.txt,.py,.json,.yaml,.yml,.j2,.tmpl,.sh,.toml,.cfg,.ini" style="display:none;">
+          <div class="upload-icon">📂</div>
+          <div>Drop files or click to upload</div>
+          <div class="upload-hint">Markdown, text, scripts, templates &mdash; used as reference during skill generation</div>
+        </div>
+        <div class="file-chips" id="contextFilesList"></div>
+      </div>
+
       <button class="craft-btn" id="craftBtn" onclick="craftSkill()">
         <span>⚗️</span>
         <span>DISTILL SKILL</span>
@@ -661,6 +733,10 @@
 
     <!-- Progress -->
     <div class="progress-area" id="progressArea">
+      <div class="progress-step" id="step0">
+        <span class="step-icon">⬜</span>
+        <span>Loading context documents...</span>
+      </div>
       <div class="progress-step" id="step1">
         <span class="step-icon">⬜</span>
         <span>Running weak agent trajectory...</span>
@@ -671,15 +747,15 @@
       </div>
       <div class="progress-step" id="step3">
         <span class="step-icon">⬜</span>
-        <span>Contrastive analysis — extracting invariants & violations...</span>
+        <span>Contrastive analysis &mdash; extracting invariants & violations...</span>
       </div>
       <div class="progress-step" id="step4">
         <span class="step-icon">⬜</span>
-        <span>Synthesizing model-agnostic skill...</span>
+        <span>Co-evolution loop &mdash; synthesizing skill + scripts...</span>
       </div>
       <div class="progress-step" id="step5">
         <span class="step-icon">⬜</span>
-        <span>Rendering Skills.md & saving to library...</span>
+        <span>Rendering Skill Bundle & saving to library...</span>
       </div>
     </div>
 
@@ -880,8 +956,50 @@ function setStep(stepNum, state) {
 }
 
 function resetSteps() {
-  for (let i = 1; i <= 5; i++) setStep(i, '');
+  for (let i = 0; i <= 5; i++) setStep(i, '');
 }
+
+let uploadedContextFiles = [];
+
+function setupUploadZone() {
+  const zone = document.getElementById('uploadZone');
+  const input = document.getElementById('contextFiles');
+  if (!zone || !input) return;
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('dragover'); addContextFiles(e.dataTransfer.files); });
+  input.addEventListener('change', () => { addContextFiles(input.files); input.value = ''; });
+}
+
+function addContextFiles(fileList) {
+  for (const f of fileList) {
+    if (!uploadedContextFiles.find(u => u.name === f.name)) uploadedContextFiles.push(f);
+  }
+  renderFileChips();
+}
+
+function removeContextFile(name) {
+  uploadedContextFiles = uploadedContextFiles.filter(f => f.name !== name);
+  renderFileChips();
+}
+
+function renderFileChips() {
+  const container = document.getElementById('contextFilesList');
+  if (!uploadedContextFiles.length) { container.innerHTML = ''; return; }
+  container.innerHTML = uploadedContextFiles.map(f =>
+    `<div class="file-chip"><span>📄 ${escHtml(f.name)}</span><span class="remove" onclick="removeContextFile('${escHtml(f.name)}')">&times;</span></div>`
+  ).join('');
+}
+
+async function readContextFiles() {
+  if (!uploadedContextFiles.length) return null;
+  return Promise.all(uploadedContextFiles.map(async f => {
+    const text = await f.text();
+    return { filename: f.name, content: text };
+  }));
+}
+
+setupUploadZone();
 
 // ── Craft ──
 async function craftSkill() {
@@ -904,7 +1022,10 @@ async function craftSkill() {
   document.getElementById('errorBox').classList.remove('active');
   resetSteps();
 
-  // Simulate step progress (server does everything in one call)
+  const contextDocs = await readContextFiles();
+
+  setStep(0, contextDocs ? 'active' : 'done');
+  if (contextDocs) setTimeout(() => setStep(0, 'done'), 500);
   setStep(1, 'active');
   setTimeout(() => { setStep(1, 'done'); setStep(2, 'active'); }, 800);
   setTimeout(() => { setStep(2, 'done'); setStep(3, 'active'); }, 4000);
@@ -920,6 +1041,7 @@ async function craftSkill() {
         api_key: apiKey,
         weak_model: weakModel || undefined,
         strong_model: strongModel || undefined,
+        context_docs: contextDocs ? contextDocs.map(d => d.content) : undefined,
       })
     });
 
@@ -936,7 +1058,7 @@ async function craftSkill() {
     loadSkillList();
 
   } catch (err) {
-    for (let i = 1; i <= 5; i++) setStep(i, '');
+    for (let i = 0; i <= 5; i++) setStep(i, '');
     showError(err.message || 'Unknown error occurred.');
   } finally {
     btn.disabled = false;
@@ -948,13 +1070,36 @@ async function craftSkill() {
 function renderResult(data) {
   const skill = data.skill;
   const constraints = (data.constraints || '').split('\n').filter(l => l.trim());
+  const sType = (skill.skill_type || 'passive').toLowerCase();
+  const typeBadge = sType === 'hybrid' ? 'hybrid' : sType === 'active' ? 'active-skill' : 'passive';
+  const typeLabel = sType.charAt(0).toUpperCase() + sType.slice(1);
+
+  const refFiles = skill.reference_files || [];
+  const tmplFiles = skill.template_files || [];
+  const assetFiles = skill.asset_files || [];
+  const hasBundle = refFiles.length || tmplFiles.length || assetFiles.length || sType !== 'passive';
+
+  let bundleHtml = '';
+  if (hasBundle) {
+    bundleHtml = `
+      <div style="font-size:0.6rem;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin:16px 0 8px;">
+        Skill Bundle
+      </div>
+      <div class="bundle-tree">
+        <div>📄 SKILL.md</div>
+        ${sType !== 'passive' ? '<div><span class="folder">📁 scripts/</span></div><div class="file-entry">utils.py</div>' : ''}
+        ${refFiles.length ? `<div><span class="folder">📁 reference/</span></div>${refFiles.map(f => `<div class="file-entry">${escHtml(f)}</div>`).join('')}` : ''}
+        ${tmplFiles.length ? `<div><span class="folder">📁 template/</span></div>${tmplFiles.map(f => `<div class="file-entry">${escHtml(f)}</div>`).join('')}` : ''}
+        ${assetFiles.length ? `<div><span class="folder">📁 assets/</span></div>${assetFiles.map(f => `<div class="file-entry">${escHtml(f)}</div>`).join('')}` : ''}
+      </div>`;
+  }
 
   const card = document.getElementById('resultCard');
   card.innerHTML = `
     <div class="result-header">
       <div>
         <div class="result-title">✦ ${escHtml(skill.title || 'Extracted Skill')}</div>
-        <div class="result-domain">${escHtml(skill.domain || 'General')}</div>
+        <div class="result-domain">${escHtml(skill.domain || 'General')} <span class="badge ${typeBadge}" style="margin-left:6px;">${typeLabel}</span></div>
       </div>
       <a href="/api/skills/${data.skill_id}/download" class="download-btn" download="Skills.md">
         ↓ Skills.md
@@ -964,6 +1109,8 @@ function renderResult(data) {
     <p style="font-size:0.78rem;color:var(--muted);line-height:1.6;margin-bottom:16px;">
       ${escHtml(skill.description || '')}
     </p>
+
+    ${bundleHtml}
 
     <div style="font-size:0.6rem;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">
       Normative Constraints
@@ -1010,22 +1157,32 @@ async function loadSkillList() {
       return;
     }
 
-    list.innerHTML = skills.map(s => `
+    list.innerHTML = skills.map(s => {
+      const sType = (s.skill_type || 'passive').toLowerCase();
+      const typeBadge = sType === 'hybrid' ? 'hybrid' : sType === 'active' ? 'active-skill' : 'passive';
+      const refCount = (s.reference_files || []).length;
+      const tmplCount = (s.template_files || []).length;
+      const assetCount = (s.asset_files || []).length;
+      const bundleMeta = [refCount ? `${refCount} ref` : '', tmplCount ? `${tmplCount} tmpl` : '', assetCount ? `${assetCount} asset` : ''].filter(Boolean).join(' · ');
+
+      return `
       <div class="skill-card">
         <div class="skill-card-title">${escHtml(s.title || 'Unnamed Skill')}</div>
         <div class="skill-card-meta">
           <span>${escHtml(s.created_at?.slice(0,10) || '')}</span>
+          <span class="badge ${typeBadge}">${sType.charAt(0).toUpperCase() + sType.slice(1)}</span>
         </div>
         <div class="skill-card-meta" style="margin-top:3px;">
           <span style="color:var(--weak);font-size:0.58rem;">🤖 ${escHtml((s.weak_model||'').split('/').pop())}</span>
           <span style="color:var(--strong);font-size:0.58rem;">🧠 ${escHtml((s.strong_model||'').split('/').pop())}</span>
         </div>
-       <div class="skill-card-actions">
-    <a href="/api/skills/${s.id}/download" class="mini-btn dl" download="Skills.md">↓ Download</a>
-    <button onclick="evolveSkill('${s.id}')" class="mini-btn" style="border-color: var(--accent3); color: var(--accent3);">⚡ Evolve (Trace2Skill)</button>
-</div>
-      </div>
-    `).join('');
+        ${bundleMeta ? `<div style="font-size:0.58rem;color:var(--accent2);margin-top:4px;">📦 ${bundleMeta}</div>` : ''}
+        <div class="skill-card-actions">
+          <a href="/api/skills/${s.id}/download" class="mini-btn dl" download="Skills.md">↓ Download</a>
+          <button onclick="evolveSkill('${s.id}')" class="mini-btn" style="border-color: var(--accent3); color: var(--accent3);">⚡ Evolve</button>
+        </div>
+      </div>`;
+    }).join('');
   } catch (err) {
     console.error('Failed to load skills:', err);
   }

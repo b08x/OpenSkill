@@ -95,16 +95,25 @@ class LocalDiskStore(BaseSkillStore):
         skill_id: str,
         markdown: str,
         metadata: SkillMetadata,
-        executable_code: str = ""
+        executable_code: str = "",
+        reference_docs: dict[str, str] | None = None,
+        template_files: dict[str, str] | None = None,
+        asset_files: dict[str, bytes] | None = None,
     ) -> None:
         """
-        New Structure (EvoSkills Bundle):
+        Multi-folder Skill Bundle Structure:
         skills_output/
         └── <skill_id>/
-            ├── SKILL.md            # Declarative Knowledge (MemCollab)
-            ├── meta.json           # S-Path Vectors and Level (RPG Sheet)
-            └── scripts/
-                └── utils.py        # Active Code (EvoSkills)
+            ├── SKILL.md                    # Declarative Knowledge (MemCollab)
+            ├── meta.json                   # S-Path Vectors and Level (RPG Sheet)
+            ├── scripts/
+            │   └── utils.py               # Active Code (EvoSkills)
+            ├── reference/
+            │   └── *.md                   # External docs used as context
+            ├── template/
+            │   └── *.j2, *.tmpl           # Jinja2 or plain text templates
+            └── assets/
+                └── *.png, *.svg, etc     # Binary/image assets
         """
         bundle_dir = self.skills_dir / skill_id
         bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -129,6 +138,40 @@ class LocalDiskStore(BaseSkillStore):
             scripts_dir.mkdir(exist_ok=True)
             code_path = scripts_dir / "utils.py"
             code_path.write_text(executable_code, encoding="utf-8")
+
+        # 4. Save reference documents (context docs used during skill generation)
+        if reference_docs:
+            ref_dir = bundle_dir / "reference"
+            ref_dir.mkdir(exist_ok=True)
+            ref_filenames = []
+            for filename, content in reference_docs.items():
+                ref_path = ref_dir / filename
+                ref_path.write_text(content, encoding="utf-8")
+                ref_filenames.append(filename)
+            # Track in metadata
+            metadata.reference_files = ref_filenames
+
+        # 5. Save template files (Jinja2/templates)
+        if template_files:
+            tmpl_dir = bundle_dir / "template"
+            tmpl_dir.mkdir(exist_ok=True)
+            tmpl_filenames = []
+            for filename, content in template_files.items():
+                tmpl_path = tmpl_dir / filename
+                tmpl_path.write_text(content, encoding="utf-8")
+                tmpl_filenames.append(filename)
+            metadata.template_files = tmpl_filenames
+
+        # 6. Save asset files (binary images, etc)
+        if asset_files:
+            assets_dir = bundle_dir / "assets"
+            assets_dir.mkdir(exist_ok=True)
+            asset_filenames = []
+            for filename, content in asset_files.items():
+                asset_path = assets_dir / filename
+                asset_path.write_bytes(content)
+                asset_filenames.append(filename)
+            metadata.asset_files = asset_filenames
 
     async def get_skill_meta(self, skill_id: str) -> Optional[SkillMetadata]:
         sid = skill_id.strip()
@@ -165,6 +208,55 @@ class LocalDiskStore(BaseSkillStore):
             if p.exists():
                 return p.read_text(encoding="utf-8")
         return None
+
+    async def get_skill_bundle(self, skill_id: str) -> Optional[dict]:
+        """Load the complete skill bundle including all folders.
+        
+        Returns:
+            dict with: markdown, metadata, reference, template, assets
+        """
+        meta = await self.get_skill_meta(skill_id)
+        if meta is None:
+            return None
+        
+        bundle_dir = self.skills_dir / skill_id
+        if not bundle_dir.exists():
+            return None
+        
+        result = {
+            "markdown": "",
+            "metadata": meta.to_dict(),
+            "reference": {},    # filename -> content
+            "template": {},     # filename -> content
+            "assets": {},        # filename -> bytes
+        }
+        
+        # Load markdown
+        md_path = bundle_dir / "SKILL.md"
+        if md_path.exists():
+            result["markdown"] = md_path.read_text(encoding="utf-8")
+        
+        # Load reference docs
+        ref_dir = bundle_dir / "reference"
+        if ref_dir.exists():
+            for f in ref_dir.glob("*.md"):
+                result["reference"][f.name] = f.read_text(encoding="utf-8")
+        
+        # Load templates
+        tmpl_dir = bundle_dir / "template"
+        if tmpl_dir.exists():
+            for f in tmpl_dir.glob("*"):
+                if f.is_file():
+                    result["template"][f.name] = f.read_text(encoding="utf-8")
+        
+        # Load assets
+        assets_dir = bundle_dir / "assets"
+        if assets_dir.exists():
+            for f in assets_dir.glob("*"):
+                if f.is_file():
+                    result["assets"][f.name] = f.read_bytes()
+        
+        return result
 
     async def list_skills(self) -> list[SkillMetadata]:
         metas: list[SkillMetadata] = []

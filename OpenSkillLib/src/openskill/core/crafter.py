@@ -254,25 +254,46 @@ class SkillCrafter:
     def __init__(self, llm: BaseLLMProvider):
         self.llm = llm
 
-    async def generate_trajectories(
-            self, task: str, weak_model: str, strong_model: str
-    ) -> tuple[str, str]:
-        """Generates tau_w and tau_s trajectories in parallel."""
-        import asyncio
+        async def generate_trajectories(
+            self, task: str, weak_model: str, strong_model: str,
+            context_docs: list[str] | None = None
+        ) -> tuple[str, str]:
+                """Generates tau_w and tau_s trajectories in parallel.
+        
+                Args:
+                    task: The task description
+                    weak_model: Model name for weak trajectory
+                    strong_model: Model name for strong trajectory  
+                    context_docs: Optional additional documents to use as reference context
+                """
+                import asyncio
 
-        async def _run(model_id: str):
-            messages = [
-                LLMMessage(role="system", content=TRAJECTORY_SYSTEM_PROMPT),
-                LLMMessage(role="user", content=TRAJECTORY_USER_TEMPLATE.format(task=task)),
-            ]
-            # Note: Here the BaseLLMProvider must support model switching if it's OpenRouter,
-            # or ignore it if it's a fixed local model.
-            resp = await self.llm.generate(messages, max_tokens=3000)
-            return resp.content
+                # Build context section if docs provided
+                context_str = ""
+                if context_docs:
+                    context_str = "\n\n".join([
+                        f"=== Reference Document {i+1} ===\n{doc}"
+                        for i, doc in enumerate(context_docs)
+                    ])
+                    context_str = f"\n\n## Additional Context (reference only):\n{context_str}\n"
 
-        # Parallel execution for performance
-        return await asyncio.gather(_run(weak_model), _run(strong_model))
+                async def _run(model_id: str):
+                    # Inject context into the prompt if provided
+                    user_content = TRAJECTORY_USER_TEMPLATE.format(task=task)
+                    if context_str:
+                        user_content = context_str + "\n" + user_content
+                    
+                    messages = [
+                        LLMMessage(role="system", content=TRAJECTORY_SYSTEM_PROMPT),
+                        LLMMessage(role="user", content=user_content),
+                    ]
+                    # Note: Here the BaseLLMProvider must support model switching if it's OpenRouter,
+                    # or ignore it if it's a fixed local model.
+                    resp = await self.llm.generate(messages, max_tokens=3000)
+                    return resp.content
 
+                # Parallel execution for performance
+                return await asyncio.gather(_run(weak_model), _run(strong_model))
     async def co_evolve_skill_bundle(
             self,
             task: str,

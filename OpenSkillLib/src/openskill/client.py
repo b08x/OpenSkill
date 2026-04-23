@@ -231,23 +231,34 @@ class OpenSkillClient:
             strong_model: str | None = None,
             skill_id: str | None = None,
             embed: bool | None = None,
+            context_docs: list[str] | None = None,
     ) -> SkillMetadata:
         """
         EvoSkills + MemCollab pipeline:
         trajectory → contrastive analysis → co-evolutionary loop → Skill Bundle
+
+        Args:
+            task: The task description to generate a skill for
+            weak_model: Model to use for the "weak" trajectory (suboptimal reasoning)
+            strong_model: Model to use for the "strong" trajectory (optimal reasoning)
+            skill_id: Optional custom skill ID
+            embed: Whether to compute skill embeddings after creation
+            context_docs: Additional documents to use as context when generating the skill
         """
         sid = skill_id or str(uuid.uuid4())[:8]
         weak = weak_model or self.default_weak_model
         strong = strong_model or self.default_strong_model
         do_embed = embed if embed is not None else self.embed
 
-        log.info("craft.start", skill_id=sid, task=task[:80])
+        log.info("craft.start", skill_id=sid, task=task[:80], context_docs=len(context_docs or []))
 
         if self.llm is None:
             raise RuntimeError("LLM Provider not configured.")
 
-        # 1. Generate dual trajectories (MemCollab)
-        weak_traj, strong_traj = await self.crafter.generate_trajectories(task, weak, strong)
+        # 1. Generate dual trajectories (MemCollab) with optional context docs
+        weak_traj, strong_traj = await self.crafter.generate_trajectories(
+            task, weak, strong, context_docs=context_docs
+        )
 
         # 2. Contrastive analysis (MemCollab)
         constraints = await self.crafter.contrastive_analysis(task, strong_traj, weak_traj)

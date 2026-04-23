@@ -63,6 +63,11 @@ class SkillMetadata:
     trajectory_count: int = 0
     last_evolved_at: Optional[str] = None
 
+    # Multi-folder support (paths relative to skill bundle root)
+    reference_files: list[str] = field(default_factory=list)  # List of reference doc filenames
+    template_files: list[str] = field(default_factory=list)  # List of template filenames
+    asset_files: list[str] = field(default_factory=list)    # List of asset filenames
+
     vectors: dict[str, SkillVectorProfile] = field(default_factory=dict)
     embedding: Optional[list[float]] = None
     qvector: Optional[dict] = None
@@ -154,6 +159,11 @@ class BaseSkillStore(ABC):
     @abstractmethod
     async def get_skill_meta(self, skill_id: str) -> Optional[SkillMetadata]:
         """Returns the metadata of a skill."""
+        ...
+
+    @abstractmethod
+    async def get_skill_bundle(self, skill_id: str) -> Optional[dict]:
+        """Returns the complete skill bundle including all folders (reference, template, assets)."""
         ...
 
     @property
