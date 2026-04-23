@@ -211,3 +211,55 @@ method: MemCollab Contrastive Trajectory Distillation
 - **LangChain**: Compatible skill injection
 - **LlamaIndex**: Direct skill retrieval integration
 - **MCP**: Model Context Protocol server for IDE/tool integration
+
+## Troubleshooting
+
+### Tensor Shape Mismatch in Skill Retrieval
+
+**Symptom:** `/api/retrieve` endpoint returns 500 error with:
+```
+RuntimeError: mat1 and mat2 shapes cannot be multiplied (1x256 and 384x1024)
+```
+
+**Root Cause:** Dimensional mismatch between stored skill vectors and the embedding model's expected dimensions.
+
+**Technical Details:**
+The error occurs when skill vectors were created with a different embedding dimension than what the current embedding model produces:
+- Stored skill vectors: 256D (from hardcoded `EMBED_DIM` in `skill_vector.py`)
+- Current embedding model: 384D (from `all-MiniLM-L6-v2` SentenceTransformer)
+- SkillProjector expects input matching current model dimensions
+
+**Solution:** Dynamic Projector Pattern (Implemented in local_llm.py)
+```python
+# Auto-detect actual skill vector dimensions
+actual_embed_dim = skills_tensor.shape[-1]
+
+# Create projector matching actual input dimensions
+if projector is None or projector.proj.in_features != actual_embed_dim:
+    projector = SkillProjector(actual_embed_dim, LLM_HIDDEN_SIZE).to(device)
+```
+
+**Benefits:**
+- ✅ Backward compatible with existing 256D quantized skills
+- ✅ Forward compatible when embedding models change
+- ✅ No need to regenerate existing skill vectors
+- ✅ Eliminates need for synchronized `EMBED_DIM` constants across modules
+
+**Prevention:** 
+- Use single source of truth for embedding dimensions
+- Consider this pattern when integrating multiple ML models with different tensor shapes
+- Add validation to catch dimension mismatches early in development
+
+### Common Issues and Solutions
+
+**Issue:** HuggingFace models unavailable
+- **Solution:** System automatically falls back to OpenRouter API
+- **Verification:** Check console for "✗ Failed to load HF LLM" message
+
+**Issue:** OpenRouter API key not configured
+- **Solution:** Set `OPENROUTER_API_KEY` environment variable
+- **Verification:** Check for "OPENROUTER_API_KEY not set" error
+
+**Issue:** Skill quantization/dequantization errors
+- **Solution:** Verify skill vector dimensions match current embedding model
+- **Check:** Compare `skill_meta.qvector.dim` with current `EMBED_DIM`

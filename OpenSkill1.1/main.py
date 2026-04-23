@@ -34,12 +34,16 @@ import json
 import re
 import uuid
 import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+
+# Configure logging
+logger = logging.getLogger("openskill")
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
@@ -80,7 +84,7 @@ class CraftRequest(BaseModel):
     embed:        bool = True  # Compute embedding + register in graph
 
 class EvolveRequest(BaseModel):
-    skill_id:     str
+    skill_id:     Optional[str] = None  # Already in path parameter; optional in body
     api_key:      str
     # Provide pre-existing trajectories OR tasks to auto-generate them
     trajectories: Optional[list[dict]] = None  # [{task, trajectory, success}]
@@ -508,8 +512,18 @@ async def evolve_skill_endpoint(skill_id: str, req: EvolveRequest):
 
     Returns: evolved skill with patch log and statistics.
     """
-    if req.skill_id != skill_id:
+    # Validation: if skill_id sent in body, it must match path parameter
+    if req.skill_id is not None and req.skill_id != skill_id:
+        import traceback
+        error_stack = traceback.format_stack()
+        logger.warning(
+            f"skill_id mismatch detected - path: {skill_id}, body: {req.skill_id}\n"
+            f"Request body keys: {req.model_dump().keys()}\n"
+            f"Stack trace:\n{''.join(error_stack)}"
+        )
         raise HTTPException(400, "skill_id mismatch")
+
+    logger.info(f"Evolution request received for skill_id: {skill_id}")
 
     meta_path = SKILLS_DIR / f"{skill_id}.json"
     if not meta_path.exists():

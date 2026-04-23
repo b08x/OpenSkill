@@ -1,3 +1,6 @@
 **/skills_output/*
 OpenSkill1.1/skills_output
 .codemap/
+.specs/scratchpad/
+
+**/__pycache__/*
