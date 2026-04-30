@@ -9,3 +9,5 @@ OpenSkill1.1/skills_output
 graphify-out/cache/
 graphify-out/manifest.json
 graphify-out/cost.json
+
+.env.local

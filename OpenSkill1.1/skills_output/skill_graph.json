@@ -17,6 +17,18 @@
       "category": "Programming",
       "subcategory": "System Design",
       "domain": "AI System Instruction"
+    },
+    "d8b00384": {
+      "title": "Ruby Project Scaffolding",
+      "category": "General",
+      "subcategory": "General",
+      "domain": "Coding"
+    },
+    "8ea99209": {
+      "title": "Skill Extraction Error",
+      "category": "General",
+      "subcategory": "General",
+      "domain": "General"
     }
   },
   "edges": []
