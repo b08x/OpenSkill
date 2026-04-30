@@ -688,9 +688,9 @@
 
       <div class="field-group">
         <div class="field-label">
-          OpenRouter API Key <span class="badge required">Required</span>
+          OpenRouter API Key <span class="badge" style="background:rgba(100,116,139,0.15);color:#94a3b8;border:1px solid rgba(100,116,139,0.3);">Optional</span>
         </div>
-        <input type="password" id="apiKey" placeholder="sk-or-v1-..." autocomplete="off" required />
+        <input type="password" id="apiKey" placeholder="Defaults to server's .env.local key" autocomplete="off" />
       </div>
 
       <div class="model-row">
@@ -806,8 +806,8 @@ document.getElementById('btnRetrieve').addEventListener('click', async () => {
     const query = document.getElementById('retrieveTask').value;
     const apiKey = document.getElementById('apiKey').value;
 
-    if(!query || !apiKey) {
-        showError("Please fill in the task and the API Key for the search.");
+    if(!query) {
+        showError("Please fill in the task for the search.");
         return;
     }
 
@@ -905,10 +905,6 @@ ${data.reasoning_trace}
 // ── Trace2Skill Evolution ──
 async function evolveSkill(skillId) {
     const apiKey = document.getElementById('apiKey').value;
-    if(!apiKey) {
-        showError("Please fill in the API Key at the top to evolve the skill.");
-        return;
-    }
 
     const tasksStr = prompt("To evolve the skill, enter 2 or more tasks separated by commas (The system will run agents on these tasks to find new patterns):", "Ex: Create Dijkstra algorithm, Optimize an AVL tree");
     if (!tasksStr) return;
@@ -1008,8 +1004,8 @@ async function craftSkill() {
   const weakModel = document.getElementById('weakModel').value.trim();
   const strongModel = document.getElementById('strongModel').value.trim();
 
-  if (!task || !apiKey) {
-    showError('Please fill in the task and your OpenRouter API key.');
+  if (!task) {
+    showError('Please fill in the task.');
     return;
   }
 

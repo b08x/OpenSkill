@@ -690,9 +690,9 @@
 
       <div class="field-group">
         <div class="field-label">
-          OpenRouter API Key <span class="badge required">Required</span>
+          OpenRouter API Key <span class="badge" style="background:rgba(100,116,139,0.15);color:#94a3b8;border:1px solid rgba(100,116,139,0.3);">Optional</span>
         </div>
-        <input type="password" id="apiKey" placeholder="sk-or-v1-..." autocomplete="off" required />
+        <input type="password" id="apiKey" placeholder="Defaults to server's .env.local key" autocomplete="off" />
       </div>
 
       <div class="model-row">
@@ -869,8 +869,8 @@ async function craftSkill() {
   const weakModel = document.getElementById('weakModel').value.trim();
   const strongModel = document.getElementById('strongModel').value.trim();
 
-  if (!task || !apiKey) {
-    showError('Please fill in the task and your OpenRouter API key.');
+  if (!task) {
+    showError('Please fill in the task.');
     return;
   }
 
