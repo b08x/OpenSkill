@@ -31,6 +31,9 @@ dependencies = [
     "click>=8.0",
     "rich>=13.0",     # Essencial para a nova CLI que criamos
     "torch>=2.0",      # Necessário para os tensores do TurboQuant
+    "python-dotenv>=1.0.1",
+    "safetensors>=0.4.0",
+    "torch-geometric>=2.5.0",
 ]
 
 [project.optional-dependencies]
@@ -43,7 +46,7 @@ hf = [
     "bitsandbytes>=0.42",
     "scipy>=1.10",
 ]
-gnn = ["torch", "torch_geometric"]
+gnn = ["torch"]
 
 ollama = ["ollama>=0.1"]
 vllm = ["vllm>=0.4"]
