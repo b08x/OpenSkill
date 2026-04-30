@@ -84,8 +84,8 @@ class OpenSkillClient:
         # Storage: if not provided, use LocalDiskStore by default
         self.store = store or LocalDiskStore(skill_dir)
 
-        # LLM Provider: if not provided, try OpenRouter (requires API key)
-        self.llm = llm
+        # LLM Provider: if not provided, try OpenRouter (requires .env.local key)
+        self.llm = llm or OpenRouterProvider()
 
         # Model defaults
         self.default_weak_model = default_weak_model

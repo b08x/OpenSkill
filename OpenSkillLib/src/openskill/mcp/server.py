@@ -43,6 +43,7 @@ except ImportError:
 
 from openskill import OpenSkillClient
 from openskill.storage.local import LocalDiskStore
+from openskill.utils.config import get_openrouter_key
 
 log = structlog.get_logger()
 
@@ -53,7 +54,7 @@ class MCPServerConfig:
     skill_dir: str = "./skills_output"
     default_weak_model: str = "openai/gpt-4o-mini"
     default_strong_model: str = "anthropic/claude-3-5-sonnet"
-    api_key: Optional[str] = None
+    api_key: Optional[str] = field(default_factory=get_openrouter_key)
 
 
 @dataclass

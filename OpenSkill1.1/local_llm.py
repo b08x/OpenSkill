@@ -13,13 +13,15 @@ import httpx
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from sentence_transformers import SentenceTransformer
 
+from openskill.utils.config import get_openrouter_key
+
 # ── Model Configuration ──────────────────────────────────────────────────────
 LLM_MODEL_ID = "Qwen/Qwen3.5-0.8B"  # Chat/Instruct Model
 EMBED_MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
 
 # OpenRouter fallback configuration
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_API_KEY = get_openrouter_key()
 FALLBACK_MODEL = "mistralai/mistral-7b-instruct"
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -93,10 +95,11 @@ def get_embedding(text: str) -> np.ndarray:
 def _openrouter_generate(prompt: str, max_tokens: int = 1500) -> str:
     """Fallback to OpenRouter API when HF models unavailable."""
     if not OPENROUTER_API_KEY:
-        raise RuntimeError(
+        raise ValueError(
             "HF models unavailable and OPENROUTER_API_KEY not set. "
-            "Set OPENROUTER_API_KEY environment variable for fallback."
+            "Set OPENROUTER_API_KEY in .env.local for fallback."
         )
+
     
     messages = [{"role": "user", "content": prompt}]
     headers = {

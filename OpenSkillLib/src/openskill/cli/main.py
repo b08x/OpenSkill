@@ -31,6 +31,7 @@ from openskill import OpenSkillClient, LocalDiskStore
 from openskill.llm.openrouter import OpenRouterProvider
 from openskill.llm.ollama import OllamaProvider
 from openskill.core.vector import unpack_qvector
+from openskill.utils.config import get_openrouter_key
 
 # Logger and Console for rich UI in the terminal
 log = structlog.get_logger()
@@ -53,7 +54,7 @@ def get_client(skill_dir: str, api_key: Optional[str], local: bool, model_id: Op
     elif api_key:
         llm = OpenRouterProvider(api_key=api_key)
     else:
-        key = os.getenv("OPENROUTER_API_KEY", "")
+        key = get_openrouter_key()
         llm = OpenRouterProvider(api_key=key) if key else None
 
     return OpenSkillClient(store=store, llm=llm)

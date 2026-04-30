@@ -17,6 +17,7 @@ from openskill.llm.base import (
     LLMMessage,
     LLMResponse
 )
+from openskill.utils.config import get_openrouter_key
 
 log = structlog.get_logger()
 
@@ -30,11 +31,11 @@ class OpenRouterProvider(BaseLLMProvider):
 
     def __init__(
             self,
-            api_key: str,
+            api_key: Optional[str] = None,
             default_model: str = "openai/gpt-4o-mini",
             timeout: float = 120.0
     ):
-        self.api_key = api_key
+        self.api_key = api_key or get_openrouter_key()
         self.default_model = default_model
         self.timeout = timeout
         self._client = httpx.AsyncClient(

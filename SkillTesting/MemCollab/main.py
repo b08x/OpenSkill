@@ -18,13 +18,15 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from openskill.utils.config import get_openrouter_key
+
 app = FastAPI(title="SkillCrafter", version="1.0.0")
 
 SKILLS_DIR = Path("skills_output")
 SKILLS_DIR.mkdir(exist_ok=True)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_API_KEY = get_openrouter_key()
 
 # ──────────────────────────────────────────────
 # Models
@@ -37,7 +39,7 @@ STRONG_MODEL = "anthropic/claude-sonnet-4.6"
 # ──────────────────────────────────────────────
 class CraftRequest(BaseModel):
     task: str
-    api_key: str
+    api_key: Optional[str] = None
     weak_model: Optional[str] = None
     strong_model: Optional[str] = None
 
@@ -52,7 +54,7 @@ class SkillEntry(BaseModel):
 
 class RetrieveRequest(BaseModel):
     query: str
-    api_key: str
+    api_key: Optional[str] = None
     model: Optional[str] = None
     top_k: Optional[int] = 3
 
@@ -114,7 +116,7 @@ async def call_llm(api_key: str, model: str, messages: list, max_tokens: int = 2
     key = api_key or OPENROUTER_API_KEY
     if not key:
         raise HTTPException(status_code=400,
-                            detail="No OpenRouter API key provided. Set OPENROUTER_API_KEY env var or enter it in the UI.")
+                            detail="No OpenRouter API key provided. Set OPENROUTER_API_KEY in .env.local or enter it in the UI.")
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
@@ -380,17 +382,21 @@ strong_agent: {strong_model}
 @app.post("/api/craft")
 async def craft_skill(req: CraftRequest):
     """Main MemCollab pipeline: dual trajectory → contrastive analysis → Skill.md"""
+    api_key = req.api_key or OPENROUTER_API_KEY
+    if not api_key:
+        raise HTTPException(status_code=400, detail="No OpenRouter API key provided.")
+
     weak = req.weak_model or WEAK_MODEL
     strong = req.strong_model or STRONG_MODEL
 
     # Step 1: Generate trajectories from both agents
     try:
-        weak_traj = await generate_trajectory(req.api_key, weak, req.task)
+        weak_traj = await generate_trajectory(api_key, weak, req.task)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Weak agent failed: {str(e)}")
 
     try:
-        strong_traj = await generate_trajectory(req.api_key, strong, req.task)
+        strong_traj = await generate_trajectory(api_key, strong, req.task)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Strong agent failed: {str(e)}")
 
@@ -398,7 +404,7 @@ async def craft_skill(req: CraftRequest):
     # Prefer strong trajectory as positive
     try:
         constraints = await contrastive_analysis(
-            req.api_key, strong, req.task,
+            api_key, strong, req.task,
             preferred=strong_traj,
             unpreferred=weak_traj
         )
@@ -408,7 +414,7 @@ async def craft_skill(req: CraftRequest):
     # Step 3: Synthesize structured skill
     try:
         skill_data = await synthesize_skill(
-            req.api_key, strong, req.task,
+            api_key, strong, req.task,
             constraints, weak_traj, strong_traj
         )
     except Exception as e:
@@ -416,7 +422,7 @@ async def craft_skill(req: CraftRequest):
 
     # --- NEW: Classify Task (NOW IN RIGHT PLACE) ---
     try:
-        classification = await classify_task(req.api_key, strong, req.task)
+        classification = await classify_task(api_key, strong, req.task)
     except Exception:
         classification = {"category": "General", "subcategory": "General"}
 
@@ -486,10 +492,14 @@ async def retrieve_skills(req: RetrieveRequest):
     """
     Task-Aware Retrieval: Classifies question and searches for compatible Skills.
     """
+    api_key = req.api_key or OPENROUTER_API_KEY
+    if not api_key:
+        raise HTTPException(status_code=400, detail="No OpenRouter API key provided.")
+
     model = req.model or STRONG_MODEL
 
     # 1. Classifies user question
-    classification = await classify_task(req.api_key, model, req.query)
+    classification = await classify_task(api_key, model, req.query)
     target_cat = classification.get("category", "")
     target_sub = classification.get("subcategory", "")
 

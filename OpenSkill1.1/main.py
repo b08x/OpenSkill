@@ -47,6 +47,8 @@ logger = logging.getLogger("openskill")
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
+from openskill.utils.config import get_openrouter_key
+
 from local_llm import generate_with_soft_latents
 # ── New modules ───────────────────────────────────────────────────────────────
 from skill_vector import compute_and_store_embedding, cosine_similarity_raw
@@ -68,7 +70,7 @@ SKILLS_DIR = Path("skills_output")
 SKILLS_DIR.mkdir(exist_ok=True)
 
 OPENROUTER_URL   = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_API_KEY = get_openrouter_key()
 
 WEAK_MODEL   = "openai/gpt-oss-120b"
 STRONG_MODEL = "minimax/minimax-m2.7"
@@ -78,14 +80,14 @@ STRONG_MODEL = "minimax/minimax-m2.7"
 
 class CraftRequest(BaseModel):
     task:         str
-    api_key:      str
+    api_key:      Optional[str] = None
     weak_model:   Optional[str] = None
     strong_model: Optional[str] = None
     embed:        bool = True  # Compute embedding + register in graph
 
 class EvolveRequest(BaseModel):
     skill_id:     Optional[str] = None  # Already in path parameter; optional in body
-    api_key:      str
+    api_key:      Optional[str] = None
     # Provide pre-existing trajectories OR tasks to auto-generate them
     trajectories: Optional[list[dict]] = None  # [{task, trajectory, success}]
     tasks:        Optional[list[str]]  = None  # Auto-generate trajectories for these
@@ -93,13 +95,13 @@ class EvolveRequest(BaseModel):
 
 class RetrieveRequest(BaseModel):
     query:   str
-    api_key: str
+    api_key: Optional[str] = None
     model:   Optional[str] = None
     top_k:   Optional[int] = 3
     use_graph: bool = True  # Use S-Path-RAG graph retrieval (vs legacy category)
 
 class GraphEdgeRequest(BaseModel):
-    api_key:   str
+    api_key:   Optional[str] = None
     from_id:   str
     to_id:     str
     edge_type: str  # PREREQUISITE_OF | EXTENDS | RESOLVES_ERROR | SIMILAR_TO | CONTRADICTS
@@ -393,14 +395,18 @@ async def craft_skill(req: CraftRequest, background_tasks: BackgroundTasks):
     MemCollab pipeline: dual trajectory → contrastive analysis → Skill.md
     Then (async): embed skill → register in graph (TurboQuant + S-Path-RAG)
     """
+    api_key = req.api_key or OPENROUTER_API_KEY
+    if not api_key:
+        raise HTTPException(400, "No OpenRouter API key provided.")
+
     weak   = req.weak_model   or WEAK_MODEL
     strong = req.strong_model or STRONG_MODEL
 
     # Step 1: Generate dual trajectories
     try:
         weak_traj, strong_traj = await asyncio.gather(
-            generate_trajectory(req.api_key, weak,   req.task),
-            generate_trajectory(req.api_key, strong, req.task),
+            generate_trajectory(api_key, weak,   req.task),
+            generate_trajectory(api_key, strong, req.task),
         )
     except Exception as e:
         raise HTTPException(500, f"Trajectory generation failed: {e}")
@@ -408,7 +414,7 @@ async def craft_skill(req: CraftRequest, background_tasks: BackgroundTasks):
     # Step 2: Contrastive analysis (MemCollab)
     try:
         constraints = await contrastive_analysis(
-            req.api_key, strong, req.task,
+            api_key, strong, req.task,
             preferred=strong_traj, unpreferred=weak_traj
         )
     except Exception as e:
@@ -417,7 +423,7 @@ async def craft_skill(req: CraftRequest, background_tasks: BackgroundTasks):
     # Step 3: Synthesize structured skill
     try:
         skill_data = await synthesize_skill(
-            req.api_key, strong, req.task,
+            api_key, strong, req.task,
             constraints, weak_traj, strong_traj
         )
     except Exception as e:
@@ -425,7 +431,7 @@ async def craft_skill(req: CraftRequest, background_tasks: BackgroundTasks):
 
     # Step 4: Task classification (MemCollab task-aware retrieval)
     try:
-        classification = await classify_task(req.api_key, strong, req.task)
+        classification = await classify_task(api_key, strong, req.task)
     except Exception:
         classification = {"category": "General", "subcategory": "General"}
 
@@ -468,11 +474,11 @@ async def craft_skill(req: CraftRequest, background_tasks: BackgroundTasks):
             try:
                 all_metas = load_all_metas()
                 updated_meta = await compute_and_store_embedding(
-                    req.api_key, skill_md, meta, meta_path
+                    api_key, skill_md, meta, meta_path
                 )
                 all_metas[skill_id] = updated_meta
                 await register_skill_in_graph(
-                    req.api_key, skill_id, updated_meta, all_metas
+                    api_key, skill_id, updated_meta, all_metas
                 )
             except Exception as ex:
                 print(f"[OpenSkill] Background embed/graph failed for {skill_id}: {ex}")
@@ -536,13 +542,16 @@ async def evolve_skill_endpoint(skill_id: str, req: EvolveRequest):
 
     skill_md = filepath.read_text(encoding="utf-8")
     analyst  = req.analyst_model or STRONG_MODEL
+    api_key  = req.api_key or OPENROUTER_API_KEY
+    if not api_key:
+        raise HTTPException(400, "No OpenRouter API key provided.")
 
     # Stage 1: Obtain trajectories
     trajectories = req.trajectories or []
     if not trajectories and req.tasks:
         try:
             trajectories = await generate_evolution_trajectories(
-                req.api_key, analyst, skill_md, req.tasks
+                api_key, analyst, skill_md, req.tasks
             )
         except Exception as e:
             raise HTTPException(500, f"Trajectory generation failed: {e}")
@@ -553,7 +562,7 @@ async def evolve_skill_endpoint(skill_id: str, req: EvolveRequest):
     # Stages 2–4: Trace2Skill fleet evolution
     try:
         result = await evolve_skill(
-            api_key       = req.api_key,
+            api_key       = api_key,
             analyst_model = analyst,
             skill_md      = skill_md,
             trajectories  = trajectories,
@@ -575,7 +584,7 @@ async def evolve_skill_endpoint(skill_id: str, req: EvolveRequest):
     # Re-embed after evolution (skill content changed)
     try:
         all_metas = load_all_metas()
-        await compute_and_store_embedding(req.api_key, evolved_md, meta, meta_path)
+        await compute_and_store_embedding(api_key, evolved_md, meta, meta_path)
     except Exception as ex:
         print(f"[OpenSkill] Re-embedding after evolution failed: {ex}")
 
@@ -603,6 +612,10 @@ async def retrieve_skills(req: RetrieveRequest):
     When use_graph=False:
       Legacy MemCollab category-based retrieval (kept for comparison)
     """
+    api_key   = req.api_key or OPENROUTER_API_KEY
+    if not api_key:
+        raise HTTPException(400, "No OpenRouter API key provided.")
+
     model     = req.model or STRONG_MODEL
     all_metas = load_all_metas()
 
@@ -617,7 +630,7 @@ async def retrieve_skills(req: RetrieveRequest):
     if req.use_graph:
         try:
             result = await graph_retrieve(
-                api_key=req.api_key,
+                api_key=api_key,
                 query=req.query,
                 all_metas=all_metas,
                 top_k=req.top_k,
@@ -668,7 +681,7 @@ async def retrieve_skills(req: RetrieveRequest):
 
     else:
         # ── Legacy MemCollab category-based retrieval ────────────────────────
-        classification = await classify_task(req.api_key, model, req.query)
+        classification = await classify_task(api_key, model, req.query)
         target_cat = classification.get("category", "")
         target_sub = classification.get("subcategory", "")
 
@@ -706,6 +719,10 @@ async def get_graph():
 @app.post("/api/graph/edge")
 async def add_manual_edge(req: GraphEdgeRequest):
     """Manually add a typed edge to the skill graph."""
+    api_key = req.api_key or OPENROUTER_API_KEY
+    if not api_key:
+        raise HTTPException(400, "No OpenRouter API key provided.")
+
     from skill_graph import load_graph, add_edge, save_graph
     valid_types = {"PREREQUISITE_OF", "EXTENDS", "RESOLVES_ERROR", "SIMILAR_TO", "CONTRADICTS"}
     if req.edge_type not in valid_types:
@@ -713,6 +730,12 @@ async def add_manual_edge(req: GraphEdgeRequest):
     graph = load_graph()
     add_edge(graph, req.from_id, req.to_id, req.edge_type, req.weight, req.reason)
     save_graph(graph)
+
+    # Re-register to update GNN if needed
+    all_metas = load_all_metas()
+    if req.from_id in all_metas:
+        await register_skill_in_graph(api_key, req.from_id, all_metas[req.from_id], all_metas)
+
     return {"status": "ok", "edge": {
         "from": req.from_id, "to": req.to_id,
         "type": req.edge_type, "weight": req.weight,
@@ -720,11 +743,15 @@ async def add_manual_edge(req: GraphEdgeRequest):
 
 
 @app.post("/api/embed/{skill_id}")
-async def recompute_embedding(skill_id: str, api_key: str):
+async def recompute_embedding(skill_id: str, api_key: Optional[str] = None):
     """
     (Re)compute TurboQuant embedding for a skill and update graph edges.
     Useful after manual skill edits or when embedding was skipped.
     """
+    api_key = api_key or OPENROUTER_API_KEY
+    if not api_key:
+        raise HTTPException(400, "No OpenRouter API key provided.")
+
     meta_path = SKILLS_DIR / f"{skill_id}.json"
     if not meta_path.exists():
         raise HTTPException(404, f"Skill {skill_id} not found")
