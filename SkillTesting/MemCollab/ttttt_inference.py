@@ -1,12 +1,14 @@
 import os
 import requests
 
+from openskill.utils.config import get_openrouter_key
+
 # ==========================================
 # CONFIGURATIONS
 # ==========================================
 RETRIEVE_URL = os.getenv("RETRIEVE_API_URL", "http://localhost:8000/api/retrieve")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+API_KEY = get_openrouter_key()
 
 # We use a WEAK model to prove that the Skill teaches it to get it right
 TEST_MODEL = "meta-llama/llama-3.1-8b-instruct"

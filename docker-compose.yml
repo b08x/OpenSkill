@@ -9,6 +9,8 @@ services:
     volumes:
       - ./skills_output:/app/skills_output
       - .:/app
+    env_file:
+      - .env.local
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - HF_TOKEN=${HF_TOKEN}

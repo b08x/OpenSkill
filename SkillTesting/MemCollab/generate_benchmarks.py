@@ -2,13 +2,15 @@ import os
 import time
 import requests
 
+from openskill.utils.config import get_openrouter_key
+
 # ==========================================
 # CONFIGURATIONS
 # ==========================================
 API_URL = os.getenv("CRAFT_API_URL", "http://localhost:8000/api/craft")
 
 # Get key from environment or paste it directly here
-API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+API_KEY = get_openrouter_key()
 
 # Recommendation: 8B to fail (Weak) and R1/Minimax to succeed (Strong)
 WEAK_MODEL = "meta-llama/llama-3.1-8b-instruct"
@@ -47,7 +49,7 @@ BENCHMARK_TASKS = [
 
 def main():
     if API_KEY == "PASTE_YOUR_OPENROUTER_KEY_HERE" or not API_KEY:
-        print("❌ ERROR: Please configure your OPENROUTER_API_KEY in the script or environment variables.")
+        print("❌ ERROR: Please configure your OPENROUTER_API_KEY in .env.local.")
         return
 
     print("🚀 Starting mass skill generation (MemCollab Benchmark)...")

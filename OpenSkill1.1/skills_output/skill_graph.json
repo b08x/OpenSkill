@@ -5,6 +5,18 @@
       "category": "Programming",
       "subcategory": "System Design",
       "domain": "Distributed Systems / Consensus Protocols"
+    },
+    "f36b23e9": {
+      "title": "SFL Technical Documentation Architect",
+      "category": "General",
+      "subcategory": "General",
+      "domain": "Technical Writing / Systemic Functional Linguistics"
+    },
+    "8492e4d2": {
+      "title": "Behavioral Prose Calibration",
+      "category": "Programming",
+      "subcategory": "System Design",
+      "domain": "AI System Instruction"
     }
   },
   "edges": []
