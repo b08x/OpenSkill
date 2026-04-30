@@ -17,10 +17,23 @@ Módulos:
   graph.py     — S-Path-RAG: semantic graph retrieval
 """
 
-from openskill.core.crafter import SkillCrafter
-from openskill.core.evolver import SkillEvolver
-from openskill.core.vector import TurboQuantizer
-from openskill.core.graph import SkillGraph
+# ── Lazy Core Imports ────────────────────────────────────────────────────────
+
+def __getattr__(name: str):
+    if name == "SkillCrafter":
+        from openskill.core.crafter import SkillCrafter
+        return SkillCrafter
+    if name == "SkillEvolver":
+        from openskill.core.evolver import SkillEvolver
+        return SkillEvolver
+    if name == "TurboQuantizer":
+        from openskill.core.vector import TurboQuantizer
+        return TurboQuantizer
+    if name == "SkillGraph":
+        from openskill.core.graph import SkillGraph
+        return SkillGraph
+    
+    raise AttributeError(f"module {__name__} has no attribute {name}")
 
 __all__ = [
     "SkillCrafter",

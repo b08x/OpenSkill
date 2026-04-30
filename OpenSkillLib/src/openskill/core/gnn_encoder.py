@@ -10,8 +10,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch_geometric.nn as gnn
-# We use safetensors as it is faster, more secure, and an industry standard (SaaS)
-from safetensors.torch import save_file, load_file
 import structlog
 
 log = structlog.get_logger()
@@ -100,6 +98,7 @@ def encode_graph_embeddings(
 
     # ─── GNN PERSISTENCE LOGIC (SAAS READY) ───
     if save_dir:
+        from safetensors.torch import save_file, load_file
         model_path = save_dir / "gnn_brain.safetensors"
         if model_path.exists():
             try:

@@ -32,25 +32,50 @@ Exemplo rápido:
     guidance = await client.retrieve("How to handle network partitions in Raft?")
 """
 
-from openskill.core.crafter import SkillCrafter
-from openskill.core.evolver import SkillEvolver
-from openskill.core.vector import TurboQuantizer
-from openskill.core.graph import SkillGraph
+# ── Lazy Imports ─────────────────────────────────────────────────────────────
 
-from openskill.storage.base import BaseSkillStore
-from openskill.storage.local import LocalDiskStore
-from openskill.storage.cloud import CloudSaaSStore
-
-from openskill.llm.base import BaseLLMProvider
-from openskill.llm.openrouter import OpenRouterProvider
-from openskill.llm.ollama import OllamaProvider
-
-from openskill.retrieval.retriever import OpenSkillRetriever
-from openskill.injection.soft import SkillProjector
-
-# ── High-level client ─────────────────────────────────────────────────────────
-
-from openskill.client import OpenSkillClient
+def __getattr__(name: str):
+    if name == "SkillCrafter":
+        from openskill.core.crafter import SkillCrafter
+        return SkillCrafter
+    if name == "SkillEvolver":
+        from openskill.core.evolver import SkillEvolver
+        return SkillEvolver
+    if name == "TurboQuantizer":
+        from openskill.core.vector import TurboQuantizer
+        return TurboQuantizer
+    if name == "SkillGraph":
+        from openskill.core.graph import SkillGraph
+        return SkillGraph
+    if name == "BaseSkillStore":
+        from openskill.storage.base import BaseSkillStore
+        return BaseSkillStore
+    if name == "LocalDiskStore":
+        from openskill.storage.local import LocalDiskStore
+        return LocalDiskStore
+    if name == "CloudSaaSStore":
+        from openskill.storage.cloud import CloudSaaSStore
+        return CloudSaaSStore
+    if name == "BaseLLMProvider":
+        from openskill.llm.base import BaseLLMProvider
+        return BaseLLMProvider
+    if name == "OpenRouterProvider":
+        from openskill.llm.openrouter import OpenRouterProvider
+        return OpenRouterProvider
+    if name == "OllamaProvider":
+        from openskill.llm.ollama import OllamaProvider
+        return OllamaProvider
+    if name == "OpenSkillRetriever":
+        from openskill.retrieval.retriever import OpenSkillRetriever
+        return OpenSkillRetriever
+    if name == "SkillProjector":
+        from openskill.injection.soft import SkillProjector
+        return SkillProjector
+    if name == "OpenSkillClient":
+        from openskill.client import OpenSkillClient
+        return OpenSkillClient
+    
+    raise AttributeError(f"module {__name__} has no attribute {name}")
 
 __all__ = [
     # Core

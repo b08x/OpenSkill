@@ -18,9 +18,6 @@ from dataclasses import dataclass, field
 from typing import Optional, Any, TYPE_CHECKING
 import structlog
 import torch
-from safetensors.torch import load_file
-
-from openskill.core.gnn_encoder import encode_graph_embeddings
 
 if TYPE_CHECKING:
     from openskill.storage.base import BaseSkillStore
@@ -320,6 +317,7 @@ class SkillGraph:
         return paths
 
     async def get_embeddings(self, use_gnn: bool = False) -> dict[str, np.ndarray]:
+        from openskill.core.gnn_encoder import encode_graph_embeddings
         all_metas = await self.store.list_skills()
         if not use_gnn:
             return {m.id: np.array(m.embedding) for m in all_metas if m.embedding}
@@ -377,6 +375,7 @@ async def register_skill_in_graph(skill_id, meta, all_metas, store, use_gnn: boo
     await store.update_graph(graph)
 
     if use_gnn:
+        from openskill.core.gnn_encoder import encode_graph_embeddings
         log.info("graph.gnn_refinement_start", trigger_skill=skill_id)
         current_all_metas = await store.list_skills()
         save_dir = store.workspace_path
