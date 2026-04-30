@@ -60,9 +60,9 @@ except Exception as e:
 # Ideally, this layer should be trained (Alignment Loss). For zero-shot inference,
 # we initialize a linear layer.
 class SkillProjector(nn.Module):
-    def __init__(self, embed_dim, llm_dim):
+    def __init__(self, embed_dim, llm_dim, dtype=torch.float16):
         super().__init__()
-        self.proj = nn.Linear(embed_dim, llm_dim, dtype=torch.float16)
+        self.proj = nn.Linear(embed_dim, llm_dim, dtype=dtype)
 
     def forward(self, x):
         return self.proj(x)
@@ -173,7 +173,10 @@ def generate_with_soft_latents(prompt: str, skill_vectors: list[np.ndarray], max
     # 2. Prepare Skill Soft Latents
     if skill_vectors:
         # Convert list of numpy arrays to tensor [Num_Skills, Embed_Dim]
-        skills_tensor = torch.tensor(skill_vectors, dtype=torch.float16, device=device)
+        # FIX: Avoid creating tensor from list of numpy arrays (PyTorch anti-pattern)
+        # First convert to single numpy array, then to tensor with model's dtype
+        skill_array = np.array(skill_vectors, dtype=np.float32)
+        skills_tensor = torch.from_numpy(skill_array).to(device=device, dtype=llm_model.dtype)
 
         # 3. Dynamic Projector Creation: Auto-detect input dimension
         actual_embed_dim = skills_tensor.shape[-1]  # Get actual dimension from skill vectors
@@ -182,11 +185,11 @@ def generate_with_soft_latents(prompt: str, skill_vectors: list[np.ndarray], max
         if len(skills_tensor.shape) != 2:
             raise ValueError(f"Expected skill vectors as 2D tensor [num_skills, embed_dim], got shape {skills_tensor.shape}")
 
-        # Create projector with correct input dimension
+        # Create projector with correct input dimension and dtype
         global projector
         if projector is None or projector.proj.in_features != actual_embed_dim:
             print(f"✓ Creating dynamic projector: {actual_embed_dim}D → {LLM_HIDDEN_SIZE}D")
-            projector = SkillProjector(actual_embed_dim, LLM_HIDDEN_SIZE).to(device)
+            projector = SkillProjector(actual_embed_dim, LLM_HIDDEN_SIZE, dtype=skills_tensor.dtype).to(device)
 
         # 4. Project from actual embedding dimension to LLM dimension
         with torch.no_grad():
